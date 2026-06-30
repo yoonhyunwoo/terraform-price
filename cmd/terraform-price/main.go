@@ -72,6 +72,10 @@ func main() {
 	for _, r := range resources {
 		addr := r.Type + "." + r.Name
 		kind, spec, note := mapper.MapResource(r, res, idx, region)
+		if kind == mapper.KindVariable {
+			items = append(items, variableItem(ctx, pricer, addr, r.Type, note, spec))
+			continue
+		}
 		if kind != mapper.KindFixed {
 			items = append(items, classifyItem(kind, addr, r.Type, note))
 			continue
@@ -91,15 +95,6 @@ func main() {
 		})
 	}
 
-	gaps := 0
-	for _, it := range items {
-		if it.Kind == output.Unsupported {
-			gaps++
-		}
-	}
-	if gaps > 0 {
-		fmt.Fprintf(os.Stderr, "⚠️ 미지원 과금 리소스 %d건이 단가 매핑에서 누락되어 추정에서 제외됨 — 보고서 '미지원 과금 리소스' 섹션 확인\n", gaps)
-	}
 	output.WriteMarkdown(os.Stdout, service, region, items)
 
 	if cacher != nil {
@@ -107,6 +102,27 @@ func main() {
 			fmt.Fprintln(os.Stderr, "cache:", err)
 		}
 	}
+}
+
+func variableItem(ctx context.Context, pricer price.Pricer, addr, typ, note string, spec *mapper.Spec) output.CostItem {
+	item := output.CostItem{Kind: output.Variable, Addr: addr, Type: typ, Note: note}
+	if spec == nil {
+		return item
+	}
+	for _, rt := range spec.Rates {
+		p, unit, err := pricer.UnitPrice(ctx, rt.ServiceCode, rt.Filters, rt.PreferUnit)
+		if err != nil {
+			continue
+		}
+		if rt.DisplayMult > 0 {
+			p *= rt.DisplayMult
+		}
+		if rt.DisplayUnit != "" {
+			unit = rt.DisplayUnit
+		}
+		item.Rates = append(item.Rates, output.RateLine{Label: rt.Label, UnitPrice: p, Unit: unit})
+	}
+	return item
 }
 
 func classifyItem(kind mapper.Kind, addr, typ, note string) output.CostItem {

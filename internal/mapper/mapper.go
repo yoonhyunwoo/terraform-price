@@ -2,6 +2,7 @@ package mapper
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -46,7 +47,6 @@ var infoTypes = map[string]string{
 	"aws_vpc_endpoint":               "VPC endpoint — 서비스별 시간당 (단가 산정 안 됨)",
 	"aws_vpn_connection":             "VPN 연결 — 시간당 (usagetype 미지원)",
 	"aws_kms_key":                    "KMS 키 — $1/월 고정 (Price List 단가 unit 라이브 확인 필요)",
-	"aws_secretsmanager_secret":      "Secrets Manager — $0.40/월 고정 (단가 unit 라이브 확인 필요)",
 	"aws_route53_zone":               "Route53 호스티드존 — $0.50/월 Global (단가 라이브 확인 필요)",
 	"aws_fsx_windows_file_system":    "FSx Windows — GB-월 (lustre만 산정)",
 	"aws_fsx_ontap_file_system":      "FSx ONTAP — GB-월 (lustre만 산정)",
@@ -73,6 +73,18 @@ var freeTypes = map[string]struct{}{
 	"aws_network_acl_rule":        {},
 	"aws_network_interface":       {},
 	"aws_db_subnet_group":         {},
+	"aws_iam_role_policy_attachment":       {},
+	"aws_iam_role_policy":                  {},
+	"aws_rds_cluster_parameter_group":      {},
+	"aws_db_parameter_group":               {},
+	"aws_db_option_group":                  {},
+	"aws_db_proxy_default_target_group":    {},
+	"aws_db_proxy_target":                  {},
+	"aws_secretsmanager_secret_version":    {},
+	"random_password":                      {},
+	"random_string":                        {},
+	"random_id":                            {},
+	"null_resource":                        {},
 }
 
 type Spec struct {
@@ -82,6 +94,16 @@ type Spec struct {
 	Count       int
 	Label       string
 	PreferUnit  string
+	Rates       []Rate
+}
+
+type Rate struct {
+	Label       string
+	ServiceCode string
+	Filters     []ptypes.Filter
+	PreferUnit  string
+	DisplayMult float64
+	DisplayUnit string
 }
 
 var regionToLocation = map[string]string{
@@ -235,6 +257,7 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	if loc == "" {
 		return KindFixed, nil, "unknown region: " + region
 	}
+	kind := KindFixed
 	var spec *Spec
 	var note string
 	var ok bool
@@ -243,6 +266,20 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 		spec, note, ok = mapEC2(r, res, loc)
 	case "aws_db_instance":
 		spec, note, ok = mapRDS(r, res, loc)
+	case "aws_rds_cluster":
+		spec, note, ok = mapAuroraCluster(r, res, loc, region)
+		kind = KindVariable
+	case "aws_db_proxy":
+		spec, note, ok = mapDBProxy(r, res, idx, loc, region)
+		if ok && len(spec.Rates) == 0 {
+			kind = KindFixed
+		} else {
+			kind = KindVariable
+		}
+	case "aws_secretsmanager_secret":
+		spec, note, ok = mapSecret(r, res, loc, region)
+	case "aws_rds_cluster_instance":
+		spec, note, ok = mapAuroraInstance(r, res, idx, loc)
 	case "aws_docdb_cluster_instance":
 		spec, note, ok = mapDBInstance(r, res, loc, "AmazonDocDB")
 	case "aws_neptune_cluster_instance":
@@ -275,7 +312,7 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	if !ok {
 		return KindFixed, nil, note
 	}
-	return KindFixed, spec, note
+	return kind, spec, note
 }
 
 func mapEC2(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
@@ -316,6 +353,162 @@ func mapRDS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 		},
 		UsageQty: 730, Count: 1, Label: ic,
 	}, "", true
+}
+
+func mapAuroraInstance(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, loc string) (*Spec, string, bool) {
+	ic, ok := resStr(r, res, "instance_class")
+	if !ok {
+		return nil, "instance_class 미해석", false
+	}
+	engine, ok := resStr(r, res, "engine")
+	if !ok {
+		if c := refResource(lookupExpr(r, []string{"cluster_identifier"}), idx); c != nil {
+			engine, _ = resStr(c, res, "engine")
+		}
+	}
+	return &Spec{
+		ServiceCode: "AmazonRDS",
+		Filters: []ptypes.Filter{
+			tm("instanceType", ic),
+			tm("location", loc),
+			tm("databaseEngine", auroraEngine(engine)),
+			tm("deploymentOption", "Single-AZ"),
+		},
+		UsageQty: 730, Count: 1, Label: ic,
+	}, "", true
+}
+
+func mapAuroraCluster(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
+	st, _ := resStr(r, res, "storage_type")
+	storRate := func(base, label string) (Rate, bool) {
+		ut, ok := usageType(region, base)
+		if !ok {
+			return Rate{}, false
+		}
+		return Rate{
+			Label: label, ServiceCode: "AmazonRDS",
+			Filters:    []ptypes.Filter{tm("usagetype", ut), tm("location", loc)},
+			PreferUnit: "GB-Mo", DisplayUnit: "GB-월",
+		}, true
+	}
+	var rates []Rate
+	if st == "aurora-iopt1" {
+		rt, ok := storRate("Aurora:IO-OptimizedStorageUsage", "스토리지(I/O-Optimized)")
+		if !ok {
+			return nil, "Aurora usagetype(리전) 미해석", false
+		}
+		rates = []Rate{rt}
+	} else {
+		stor, ok := storRate("Aurora:StorageUsage", "스토리지")
+		if !ok {
+			return nil, "Aurora usagetype(리전) 미해석", false
+		}
+		ioUT, _ := usageType(region, "Aurora:StorageIOUsage")
+		rates = []Rate{stor, {
+			Label: "I/O", ServiceCode: "AmazonRDS",
+			Filters:     []ptypes.Filter{tm("usagetype", ioUT), tm("location", loc)},
+			PreferUnit:  "IOs",
+			DisplayMult: 1_000_000, DisplayUnit: "100만 I/O",
+		}}
+	}
+	return &Spec{Label: "Aurora 스토리지·I/O", Rates: rates},
+		"Aurora 스토리지·I/O — 사용량만큼 청구 (인스턴스는 aws_rds_cluster_instance에서 산정)", true
+}
+
+func mapSecret(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
+	ut, ok := usageType(region, "AWSSecretsManager-Secrets")
+	if !ok {
+		return nil, "Secrets Manager usagetype(리전) 미해석", false
+	}
+	return &Spec{
+		ServiceCode: "AWSSecretsManager",
+		Filters: []ptypes.Filter{
+			tm("usagetype", ut),
+			tm("location", loc),
+		},
+		UsageQty: 1, Count: 1, Label: "Secret", PreferUnit: "Secrets",
+	}, "", true
+}
+
+func mapDBProxy(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, loc, region string) (*Spec, string, bool) {
+	ut, ok := usageType(region, "RDS:ProxyUsage")
+	if !ok {
+		return nil, "RDS Proxy usagetype(리전) 미해석", false
+	}
+	filters := []ptypes.Filter{tm("usagetype", ut), tm("location", loc)}
+	if vcpu := proxyTargetVCPU(r, res, idx); vcpu > 0 {
+		return &Spec{
+			ServiceCode: "AmazonRDS", Filters: filters,
+			UsageQty: 730, Count: vcpu, PreferUnit: "Hrs",
+			Label: fmt.Sprintf("RDS Proxy × %d vCPU", vcpu),
+		}, "", true
+	}
+	return &Spec{Label: "RDS Proxy", Rates: []Rate{{
+		Label: "vCPU", ServiceCode: "AmazonRDS",
+		Filters:    filters,
+		PreferUnit: "Hrs", DisplayUnit: "vCPU-시간",
+	}}}, "RDS Proxy — 대상 인스턴스 vCPU 미해석, 월 ≈ 단가 × vCPU 수 × 730", true
+}
+
+func proxyTargetVCPU(proxy *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) int {
+	total := 0
+	for _, t := range idx {
+		if t.Type != "aws_db_proxy_target" {
+			continue
+		}
+		if refResource(lookupExpr(t, []string{"db_proxy_name"}), idx) != proxy {
+			continue
+		}
+		if inst := refResource(lookupExpr(t, []string{"db_instance_identifier"}), idx); inst != nil {
+			if c, ok := resStr(inst, res, "instance_class"); ok {
+				if v, ok := classVCPU(c); ok {
+					total += v
+				}
+			}
+			continue
+		}
+		if cl := refResource(lookupExpr(t, []string{"db_cluster_identifier"}), idx); cl != nil {
+			for _, ci := range idx {
+				if ci.Type != "aws_rds_cluster_instance" {
+					continue
+				}
+				if refResource(lookupExpr(ci, []string{"cluster_identifier"}), idx) != cl {
+					continue
+				}
+				if c, ok := resStr(ci, res, "instance_class"); ok {
+					if v, ok := classVCPU(c); ok {
+						total += v
+					}
+				}
+			}
+		}
+	}
+	return total
+}
+
+func classVCPU(class string) (int, bool) {
+	parts := strings.Split(class, ".")
+	if len(parts) < 3 {
+		return 0, false
+	}
+	switch size := parts[len(parts)-1]; size {
+	case "nano", "micro", "small", "medium", "large":
+		return 2, true // ponytail: current-gen (t3/t4g/r/m) large-and-below = 2 vCPU; legacy t2 differs, add a map if t2 targets appear
+	case "xlarge":
+		return 4, true
+	default:
+		if n, err := strconv.Atoi(strings.TrimSuffix(size, "xlarge")); err == nil && n > 0 {
+			return 4 * n, true
+		}
+	}
+	return 0, false
+}
+
+func auroraEngine(e string) string {
+	if strings.Contains(e, "postgres") {
+		return "Aurora PostgreSQL"
+	}
+	return "Aurora MySQL"
 }
 
 func mapDBInstance(r *parser.Resource, res *resolver.Resolver, loc, serviceCode string) (*Spec, string, bool) {

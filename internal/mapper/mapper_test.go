@@ -215,6 +215,50 @@ resource "aws_kms_key" "k" {}
 	}
 }
 
+func TestClassVCPU(t *testing.T) {
+	cases := map[string]int{
+		"db.t3.micro": 2, "db.t3.medium": 2, "db.r6i.large": 2,
+		"db.r8g.xlarge": 4, "db.r5.2xlarge": 8, "db.r6g.4xlarge": 16,
+		"db.m5.24xlarge": 96,
+	}
+	for class, want := range cases {
+		got, ok := classVCPU(class)
+		if !ok || got != want {
+			t.Errorf("classVCPU(%q): want %d, got %d ok=%v", class, want, got, ok)
+		}
+	}
+	if _, ok := classVCPU("garbage"); ok {
+		t.Errorf("garbage class should not resolve")
+	}
+}
+
+func TestMapProxyResolvesTargetVCPU(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "proxy.tf", `
+resource "aws_db_instance" "rds" { instance_class = "db.r5.2xlarge" }
+resource "aws_db_proxy" "p" { name = "p" }
+resource "aws_db_proxy_target" "t" {
+  db_proxy_name          = aws_db_proxy.p.name
+  db_instance_identifier = aws_db_instance.rds.identifier
+}
+`)
+	rs, _ := parser.ParseDir(dir)
+	res := resolver.NewResolver(dir)
+	var proxy *parser.Resource
+	for _, r := range rs {
+		if r.Type == "aws_db_proxy" {
+			proxy = r
+		}
+	}
+	kind, spec, note := MapResource(proxy, res, idxOf(rs), "ap-northeast-2")
+	if kind != KindFixed || spec == nil {
+		t.Fatalf("want Fixed spec, got kind=%v spec=%v note=%q", kind, spec, note)
+	}
+	if spec.Count != 8 {
+		t.Errorf("vCPU count: want 8 (r5.2xlarge), got %d", spec.Count)
+	}
+}
+
 func TestMapFreeClassification(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "free.tf", `

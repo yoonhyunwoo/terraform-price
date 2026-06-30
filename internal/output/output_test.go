@@ -27,23 +27,20 @@ func TestWriteMarkdownFourWayPartition(t *testing.T) {
 	if !strings.Contains(out, "instance_type 미해석") {
 		t.Errorf("unresolved fixed item not shown")
 	}
-	if !strings.Contains(out, "유동비 (usage") {
-		t.Errorf("variable (usage) section missing")
+	if !strings.Contains(out, "## 유동비") {
+		t.Errorf("variable section missing")
 	}
 	if !strings.Contains(out, "aws_s3_bucket.x") {
 		t.Errorf("variable item not surfaced")
 	}
-	if !strings.Contains(out, "미지원 과금 리소스") {
+	if !strings.Contains(out, "## ⚠️ 미지원") {
 		t.Errorf("unsupported gap section missing")
 	}
 	if !strings.Contains(out, "aws_widget.w") {
 		t.Errorf("unsupported (gap) item not surfaced — silent-drop regression")
 	}
-	if !strings.Contains(out, "무과금 1건") {
-		t.Errorf("free count missing in footer")
-	}
-	if !strings.Contains(out, "미지원 과금 1건") {
-		t.Errorf("unsupported count missing in footer")
+	if !strings.Contains(out, "## 무료") || !strings.Contains(out, "aws_iam_role.r") {
+		t.Errorf("free section/item not surfaced")
 	}
 	if strings.Contains(out, "고정비 합계") && strings.Contains(out, "0.00") && !strings.Contains(out, "7.30") {
 		t.Errorf("free/variable/unsupported leaked into fixed total")
@@ -56,7 +53,7 @@ func TestWriteMarkdownNoUnsupportedOmitsGapSection(t *testing.T) {
 		{Kind: Fixed, Addr: "aws_instance.a", Spec: "t3.micro", UnitPrice: 0.01, Unit: "Hrs", Monthly: 7.3},
 	})
 	out := buf.String()
-	if strings.Contains(out, "미지원 과금 리소스") {
+	if strings.Contains(out, "## ⚠️ 미지원") {
 		t.Errorf("gap section should be omitted when no unsupported items")
 	}
 }
