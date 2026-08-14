@@ -176,6 +176,9 @@ func (r *Resolver) ResolveExpr(expr hcl.Expression) (cty.Value, bool) {
 	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
 		return r.resolveTraversal(hcl.Traversal(ste.Traversal))
 	}
+	if sx, ok := expr.(hclsyntax.Expression); ok {
+		expr = rewriteEachValue(sx)
+	}
 	if val, diags := expr.Value(r.scope()); !diags.HasErrors() {
 		return val, true
 	}

@@ -54,8 +54,11 @@ func (r *RefResolver) Verify() error {
 			return nil
 		}
 		visited[addr] = true
+		next := make([]string, len(path)+1)
+		copy(next, path)
+		next[len(path)] = addr
 		for _, dep := range r.deps(addr) {
-			if err := check(dep, append(path, addr)); err != nil {
+			if err := check(dep, next); err != nil {
 				return err
 			}
 		}
