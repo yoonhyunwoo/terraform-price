@@ -50,6 +50,12 @@ func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.
 	var items []output.CostItem
 	for _, r := range resources {
 		addr := r.Type + "." + r.Name
+		// count/for_each = 0 gates everything: the resource is not created,
+		// so resolution failures below are moot.
+		if n, metaNote := metaCount(r, res); n == 0 && metaNote == "" {
+			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "count = 0 — resource not created"})
+			continue
+		}
 		kind, spec, note := mapper.MapResource(r, res, idx, region)
 		if kind == mapper.KindVariable {
 			items = append(items, variableItem(ctx, pricer, addr, r.Type, note, spec))

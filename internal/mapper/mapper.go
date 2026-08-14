@@ -556,10 +556,25 @@ func mapElastiCache(r *parser.Resource, res *resolver.Resolver) (*Spec, string, 
 		engine = elasticacheEngine(e)
 	}
 	count := 1
-	for _, k := range []string{"num_cache_clusters", "number_of_cache_clusters"} {
+	// Cluster mode: nodes = num_node_groups × (replicas_per_node_group + 1).
+	// Both attrs are null outside cluster mode, falling through to
+	// num_cache_clusters (non-cluster replication group / cache cluster).
+	for _, k := range []string{"num_node_groups", "number_of_node_groups"} {
 		if n, ok := resNum(r, res, k); ok && n > 0 {
-			count = int(n)
+			replicas := 0
+			if rp, ok := resNum(r, res, "replicas_per_node_group"); ok && rp >= 0 {
+				replicas = int(rp)
+			}
+			count = int(n) * (replicas + 1)
 			break
+		}
+	}
+	if count == 1 {
+		for _, k := range []string{"num_cache_clusters", "number_of_cache_clusters"} {
+			if n, ok := resNum(r, res, k); ok && n > 0 {
+				count = int(n)
+				break
+			}
 		}
 	}
 	return &Spec{
