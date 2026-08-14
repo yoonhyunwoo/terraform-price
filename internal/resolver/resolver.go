@@ -32,9 +32,6 @@ func NewResolver(dir string) *Resolver {
 // defaults still backstop anything unset.
 func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 	r := &Resolver{vars: map[string]cty.Value{}, locals: map[string]cty.Value{}}
-	for k, v := range inputs {
-		r.vars[k] = v
-	}
 	parser := hclparse.NewParser()
 
 	// tfvars: terraform.tfvars first, then *.auto.tfvars (later wins).
@@ -53,6 +50,12 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 				}
 			}
 		}
+	}
+
+	// Module inputs layer on top of the directory's tfvars — a module
+	// instance's caller-supplied values win for that instantiation.
+	for k, v := range inputs {
+		r.vars[k] = v
 	}
 
 	// Variables with defaults first — locals reference them.

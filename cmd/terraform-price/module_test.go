@@ -186,3 +186,25 @@ variable "instance_type" {
 		t.Fatalf("nested module item = %+v, want t3.medium", it)
 	}
 }
+
+// Module inputs win over a tfvars file inside the module directory —
+// the caller-supplied value defines this instantiation.
+func TestModuleInputBeatsModuleTfvars(t *testing.T) {
+	root := writeModuleFixture(t, map[string]string{
+		"main.tf": `
+module "app" {
+  source        = "./mod"
+  instance_type = "t3.medium"
+}
+`,
+		"mod/main.tf":            modMain,
+		"mod/terraform.tfvars":   `instance_type = "t3.micro"`,
+	})
+	items, err := analyze(context.Background(), fakePricer{}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := itemOf(t, items, "module.app.aws_instance.x"); it.Spec != "t3.medium" {
+		t.Fatalf("spec = %q, want t3.medium (module input over tfvars)", it.Spec)
+	}
+}
