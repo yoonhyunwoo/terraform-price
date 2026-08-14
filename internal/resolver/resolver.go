@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/funcs"
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
@@ -86,7 +87,7 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 			if attrs, d := fv.Body.JustAttributes(); !d.HasErrors() {
 				for name, attr := range attrs {
 					if val, d := attr.Expr.Value(&hcl.EvalContext{}); !d.HasErrors() {
-						r.vars[name] = val
+						r.vars[name] = normalizeVarVal(val)
 					}
 				}
 			}
@@ -94,7 +95,7 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 	}
 
 	for k, v := range inputs {
-		r.vars[k] = v
+		r.vars[k] = normalizeVarVal(v)
 	}
 
 	r.loadVarDefaults(dir)
@@ -133,6 +134,12 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 func (r *Resolver) RetryLocals() bool {
 	changed := false
 	for name, expr := range r.pendingLocs {
+		if val, ok := r.resolveConditional(expr); ok {
+			r.locals[name] = val
+			delete(r.pendingLocs, name)
+			changed = true
+			continue
+		}
 		if val, d := expr.Value(r.scope()); !d.HasErrors() {
 			r.locals[name] = val
 			delete(r.pendingLocs, name)
@@ -140,6 +147,22 @@ func (r *Resolver) RetryLocals() bool {
 		}
 	}
 	return changed
+}
+
+// normalizeVarVal coerces tuple values to lists, mirroring what a
+// variable type constraint does in Terraform: conditionals like
+// `var.groups != null ? var.groups : []` fail to unify tuples of
+// different lengths but accept list vs empty tuple.
+func normalizeVarVal(v cty.Value) cty.Value {
+	if !v.IsKnown() || v.IsNull() {
+		return v
+	}
+	if v.Type().IsTupleType() {
+		if lv, err := convert.Convert(v, cty.List(cty.DynamicPseudoType)); err == nil {
+			return lv
+		}
+	}
+	return v
 }
 
 func (r *Resolver) loadVarDefaults(dir string) {
@@ -179,7 +202,7 @@ func (r *Resolver) loadVarDefaults(dir string) {
 				continue
 			}
 			if val, d := def.Expr.Value(&hcl.EvalContext{}); !d.HasErrors() {
-				r.vars[name] = val
+				r.vars[name] = normalizeVarVal(val)
 			}
 		}
 	}
@@ -219,13 +242,62 @@ func (r *Resolver) ResolveExpr(expr hcl.Expression) (cty.Value, bool) {
 	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
 		return r.resolveTraversal(hcl.Traversal(ste.Traversal))
 	}
-	if sx, ok := expr.(hclsyntax.Expression); ok {
-		expr = rewriteEachValue(sx)
+	if _, bound := r.resScope["each"]; !bound {
+		if sx, ok := expr.(hclsyntax.Expression); ok {
+			expr = rewriteEachValue(sx)
+		}
+	}
+	if val, ok := r.resolveConditional(expr); ok {
+		return val, true
 	}
 	if val, diags := expr.Value(r.scope()); !diags.HasErrors() {
 		return val, true
 	}
 	return cty.NilVal, false
+}
+
+// resolveConditional evaluates a conditional by branch — cty cannot unify
+// tuples of different lengths (`cond ? var.groups : []`), which Terraform
+// avoids by coercing values through variable type constraints. The
+// not-taken branch is irrelevant to the value, so evaluating only the
+// taken one sidesteps unification; failures fall back to native eval.
+func (r *Resolver) resolveConditional(expr hcl.Expression) (cty.Value, bool) {
+	ce, ok := expr.(*hclsyntax.ConditionalExpr)
+	if !ok {
+		return cty.NilVal, false
+	}
+	cond, diags := ce.Condition.Value(r.scope())
+	if diags.HasErrors() || !cond.IsKnown() || cond.IsNull() {
+		return cty.NilVal, false
+	}
+	b, err := convert.Convert(cond, cty.Bool)
+	if err != nil || b.IsNull() || !b.IsKnown() {
+		return cty.NilVal, false
+	}
+	branch := ce.FalseResult
+	if b.True() {
+		branch = ce.TrueResult
+	}
+	if v, ok := r.resolveConditional(branch); ok {
+		return v, true
+	}
+	if v, diags := branch.Value(r.scope()); !diags.HasErrors() {
+		return v, true
+	}
+	return cty.NilVal, false
+}
+
+// SetResourceEach binds `each` while one for_each'd resource item is
+// being resolved; ClearResourceEach restores the unbound state.
+func (r *Resolver) SetResourceEach(key, value cty.Value) {
+	if r.resScope == nil {
+		r.resScope = map[string]cty.Value{}
+	}
+	r.resScope["each"] = cty.ObjectVal(map[string]cty.Value{"key": key, "value": value})
+}
+
+func (r *Resolver) ClearResourceEach() {
+	delete(r.resScope, "each")
 }
 
 // ResolveExprWithEach evaluates an expression with `each` bound to one

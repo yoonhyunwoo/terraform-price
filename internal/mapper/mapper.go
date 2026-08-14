@@ -521,7 +521,9 @@ func mapOpenSearch(r *parser.Resource, res *resolver.Resolver) (*Spec, string, b
 		count = int(n)
 	}
 	return &Spec{
-		ServiceCode: "AmazonOpenSearchService",
+		// Prices publish under the legacy AmazonES code even though the
+		// service is named OpenSearch.
+		ServiceCode: "AmazonES",
 		Filters: []provider.Filter{
 			tm("instanceType", it),
 		},
