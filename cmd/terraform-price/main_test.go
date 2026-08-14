@@ -66,7 +66,7 @@ resource "aws_instance" "none"     {}
 		"via_var":  {3, false},
 		"missing":  {1, true},
 		"for_each": {2, false},
-		"toset":    {1, true},
+		"toset":    {1, false},
 		"none":     {1, false},
 	}
 	for _, r := range rs {

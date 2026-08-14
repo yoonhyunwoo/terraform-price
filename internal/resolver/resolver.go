@@ -1,13 +1,14 @@
 package resolver
 
 import (
-	"math/big"
 	"path/filepath"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/yoonhyunwoo/terraform-price/internal/funcs"
 )
 
 type Resolver struct {
@@ -37,7 +38,7 @@ func NewResolver(dir string) *Resolver {
 			for _, blk := range content.Blocks {
 				if attrs, d := blk.Body.JustAttributes(); !d.HasErrors() {
 					for name, attr := range attrs {
-						if val, d := attr.Expr.Value(&hcl.EvalContext{}); !d.HasErrors() {
+						if val, d := attr.Expr.Value(r.scope()); !d.HasErrors() {
 							r.locals[name] = val
 						}
 					}
@@ -56,11 +57,19 @@ func (r *Resolver) VarString(name string) (string, bool) {
 	return v.AsString(), true
 }
 
+// scope returns the evaluation context with var/local objects and the
+// standard function table (toset, length, concat, ...).
+func (r *Resolver) scope() *hcl.EvalContext {
+	return funcs.Scope(r.vars, r.locals)
+}
+
+// ResolveExpr evaluates an expression with the full scope: var/local
+// references, indexing, and function calls.
 func (r *Resolver) ResolveExpr(expr hcl.Expression) (cty.Value, bool) {
 	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
 		return r.resolveTraversal(hcl.Traversal(ste.Traversal))
 	}
-	if val, diags := expr.Value(&hcl.EvalContext{}); !diags.HasErrors() {
+	if val, diags := expr.Value(r.scope()); !diags.HasErrors() {
 		return val, true
 	}
 	return cty.NilVal, false
@@ -70,98 +79,74 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 	if len(t) == 0 {
 		return cty.NilVal, false
 	}
-	root, ok := t[0].(hcl.TraverseRoot)
+	root, ok := rootName(t[0])
 	if !ok {
 		return cty.NilVal, false
 	}
-	switch root.Name {
+	switch root {
 	case "var":
-		if len(t) < 2 {
-			return cty.NilVal, false
-		}
-		name, ok := rootName(t[1])
-		if !ok {
-			return cty.NilVal, false
-		}
-		v, ok := r.vars[name]
-		if !ok {
-			return cty.NilVal, false
-		}
-		return navigate(t[2:], v)
+		return navigate(t[1:], cty.ObjectVal(r.vars))
 	case "local":
-		if len(t) < 2 {
-			return cty.NilVal, false
-		}
-		name, ok := rootName(t[1])
-		if !ok {
-			return cty.NilVal, false
-		}
-		v, ok := r.locals[name]
-		if !ok {
-			return cty.NilVal, false
-		}
-		return navigate(t[2:], v)
+		return navigate(t[1:], cty.ObjectVal(r.locals))
 	}
 	return cty.NilVal, false
 }
 
 func rootName(tr hcl.Traverser) (string, bool) {
-	switch s := tr.(type) {
-	case hcl.TraverseAttr:
-		return s.Name, true
-	case hcl.TraverseIndex:
-		if s.Key.Type() == cty.String {
-			return s.Key.AsString(), true
-		}
+	if root, ok := tr.(hcl.TraverseRoot); ok {
+		return root.Name, true
 	}
 	return "", false
 }
 
 func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
-	for _, s := range steps {
-		if !val.IsKnown() || val.IsNull() {
-			return cty.NilVal, false
-		}
-		switch st := s.(type) {
+	for _, step := range steps {
+		switch s := step.(type) {
 		case hcl.TraverseAttr:
-			vm := val.AsValueMap()
-			if vm == nil {
+			if !val.Type().IsObjectType() || !val.Type().HasAttribute(s.Name) {
 				return cty.NilVal, false
 			}
-			v, ok := vm[st.Name]
-			if !ok {
+			attr := val.GetAttr(s.Name)
+			if !attr.IsKnown() {
 				return cty.NilVal, false
 			}
-			val = v
+			val = attr
 		case hcl.TraverseIndex:
-			if st.Key.Type() == cty.String {
-				vm := val.AsValueMap()
-				if vm == nil {
+			idx := s.Key
+			switch {
+			case idx.Type() == cty.String && val.Type().IsObjectType():
+				if !val.Type().HasAttribute(idx.AsString()) {
 					return cty.NilVal, false
 				}
-				v, ok := vm[st.Key.AsString()]
-				if !ok {
+				attr := val.GetAttr(idx.AsString())
+				if !attr.IsKnown() {
 					return cty.NilVal, false
 				}
-				val = v
-				continue
+				val = attr
+			case idx.Type() == cty.Number && val.Type().IsListType():
+				i, _ := idx.AsBigFloat().Int64()
+				list := val.AsValueSlice()
+				if i < 0 || int(i) >= len(list) {
+					return cty.NilVal, false
+				}
+				val = list[i]
+			case idx.Type() == cty.Number && val.Type().IsTupleType():
+				i, _ := idx.AsBigFloat().Int64()
+				list := val.AsValueSlice()
+				if i < 0 || int(i) >= len(list) {
+					return cty.NilVal, false
+				}
+				val = list[i]
+			default:
+				return cty.NilVal, false
 			}
-			if st.Key.Type() == cty.Number {
-				i, acc := st.Key.AsBigFloat().Int64()
-				if acc != big.Exact || i < 0 {
-					return cty.NilVal, false
-				}
-				vs := val.AsValueSlice()
-				if int(i) >= len(vs) {
-					return cty.NilVal, false
-				}
-				val = vs[i]
-				continue
-			}
-			return cty.NilVal, false
 		default:
 			return cty.NilVal, false
 		}
 	}
+	if !val.IsKnown() {
+		return cty.NilVal, false
+	}
 	return val, true
 }
+
