@@ -231,3 +231,9 @@ func (r *RefResolver) AllResolved() map[string]map[string]cty.Value {
 	}
 	return r.resolved
 }
+
+// Reset clears the resolution cache so resources re-resolve with the
+// resolver's updated scope (e.g. after RetryLocals).
+func (r *RefResolver) Reset() {
+	r.resolved = make(map[string]map[string]cty.Value)
+}

@@ -51,6 +51,9 @@ func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
 	total := 0.0
 	fmt.Fprintf(w, "# Cost Estimate — %s (`%s`)\n\n", service, region)
 	fmt.Fprintf(w, "> OnDemand list prices only — RI / Savings Plan / EDP discounts not applied\n\n")
+	if len(items) == 0 {
+		fmt.Fprintf(w, "> No resources found in this directory. If the Terraform lives in a\n> subdirectory (e.g. examples/xxx or modules/xxx), point the tool at that path.\n\n")
+	}
 
 	fmt.Fprintln(w, "## Fixed")
 	fmt.Fprintln(w, "| Resource | Spec | Unit price (USD) | Unit | Monthly (USD) |")

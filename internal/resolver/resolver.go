@@ -14,9 +14,11 @@ import (
 )
 
 type Resolver struct {
-	vars      map[string]cty.Value
-	locals    map[string]cty.Value
-	resources map[string]map[string]cty.Value
+	vars        map[string]cty.Value
+	locals      map[string]cty.Value
+	resources   map[string]map[string]cty.Value
+	pendingLocs map[string]hcl.Expression
+	resScope    map[string]cty.Value // resource TYPE → ObjectVal{name → attrs}
 }
 
 func NewResolver(dir string) *Resolver {
@@ -75,17 +77,32 @@ func NewResolver(dir string) *Resolver {
 		}
 	}
 	// Iterative fixpoint: locals can reference other locals across files.
-	for changed := true; changed && len(pending) > 0; {
-		changed = false
-		for name, la := range pending {
-			if val, d := la.expr.Value(r.scope()); !d.HasErrors() {
-				r.locals[name] = val
-				delete(pending, name)
-				changed = true
-			}
+	// Locals referencing resources stay pending until SetResources +
+	// RetryLocals (analyze iterates both to a fixpoint).
+	r.pendingLocs = make(map[string]hcl.Expression, len(pending))
+	for name, la := range pending {
+		r.pendingLocs[name] = la.expr
+	}
+	r.retryLocals()
+	return r
+}
+
+// RetryLocals re-attempts pending locals (e.g. those referencing resources
+// after SetResources). Returns true if any new local resolved.
+func (r *Resolver) RetryLocals() bool {
+	return r.retryLocals()
+}
+
+func (r *Resolver) retryLocals() bool {
+	changed := false
+	for name, expr := range r.pendingLocs {
+		if val, d := expr.Value(r.scope()); !d.HasErrors() {
+			r.locals[name] = val
+			delete(r.pendingLocs, name)
+			changed = true
 		}
 	}
-	return r
+	return changed
 }
 
 // loadVarDefaults reads variable blocks' default values so unset vars
@@ -114,11 +131,15 @@ func (r *Resolver) loadVarDefaults(dir string) {
 			if _, set := r.vars[name]; set {
 				continue
 			}
-			attrs, d := blk.Body.JustAttributes()
+			// PartialContent (not JustAttributes): variable blocks may
+			// contain nested validation blocks which JustAttributes rejects.
+			vc, _, d := blk.Body.PartialContent(&hcl.BodySchema{
+				Attributes: []hcl.AttributeSchema{{Name: "default"}},
+			})
 			if d.HasErrors() {
 				continue
 			}
-			def, ok := attrs["default"]
+			def, ok := vc.Attributes["default"]
 			if !ok {
 				continue
 			}
@@ -140,7 +161,13 @@ func (r *Resolver) VarString(name string) (string, bool) {
 // scope returns the evaluation context with var/local objects and the
 // standard function table (toset, length, concat, ...).
 func (r *Resolver) scope() *hcl.EvalContext {
-	return funcs.Scope(r.vars, r.locals)
+	ctx := funcs.Scope(r.vars, r.locals)
+	if r.resScope != nil {
+		for t, v := range r.resScope {
+			ctx.Variables[t] = v
+		}
+	}
+	return ctx
 }
 
 // ResolveExpr evaluates an expression with the full scope: var/local
@@ -251,10 +278,29 @@ func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 }
 
 
-// SetResources registers parsed resources for cross-resource reference
-// resolution (e.g. aws_instance.a.instance_type). Call after ParseDir.
+// SetResources registers resolved resource attributes and builds the
+// resource TYPE-rooted evaluation scope (aws_launch_template = {this = {...}})
+// so expressions like one(aws_launch_template.default[*].id) evaluate natively.
 func (r *Resolver) SetResources(resources map[string]map[string]cty.Value) {
 	r.resources = resources
+	byType := map[string]map[string]cty.Value{}
+	for addr, attrs := range resources {
+		parts := strings.SplitN(addr, ".", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		nameObjs, ok := byType[parts[0]]
+		if !ok {
+			nameObjs = map[string]cty.Value{}
+			byType[parts[0]] = nameObjs
+		}
+		nameObjs[parts[1]] = cty.ObjectVal(attrs)
+	}
+	scope := make(map[string]cty.Value, len(byType))
+	for t, names := range byType {
+		scope[t] = cty.ObjectVal(names)
+	}
+	r.resScope = scope
 }
 
 // ResolveResourceAttr resolves an attribute of another resource.
@@ -278,4 +324,12 @@ func (r *Resolver) ResolveLocal(name string) (cty.Value, bool) {
 		return cty.NilVal, false
 	}
 	return v, true
+}
+
+// LocalExpr returns the unevaluated expression of a local that has not
+// resolved (typically because it references computed resource attrs).
+// Used for transitive resource discovery without value resolution.
+func (r *Resolver) LocalExpr(name string) (hcl.Expression, bool) {
+	e, ok := r.pendingLocs[name]
+	return e, ok
 }

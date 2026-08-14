@@ -32,12 +32,20 @@ func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.
 		idx[r.Type+"."+r.Name] = r
 	}
 
-	// Resolve cross-resource references and inject into the resolver
+	// Resolve cross-resource references and inject into the resolver.
+	// Iterate: resource refs feed locals, locals feed resource attrs —
+	// loop both until stable so locals like
+	//   launch_template_block = { id = one(aws_launch_template.x[*].id) }
+	// and attrs referencing them both converge.
 	rr := refres.New(resources, res)
 	if err := rr.Verify(); err != nil {
 		return nil, fmt.Errorf("reference cycle: %w", err)
 	}
 	res.SetResources(rr.AllResolved())
+	for res.RetryLocals() {
+		rr.Reset()
+		res.SetResources(rr.AllResolved())
+	}
 
 	var items []output.CostItem
 	for _, r := range resources {

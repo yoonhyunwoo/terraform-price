@@ -70,6 +70,22 @@ func collectExprs(body *hclsyntax.Body, prefix string, out map[string]hcl.Expres
 		if prefix != "" {
 			bkey = prefix + "." + blk.Type
 		}
+		if blk.Type == "dynamic" && len(blk.Labels) == 1 {
+			// dynamic "launch_template" { content { id = ... } } — the
+			// content attrs are what a plain launch_template block would
+			// carry. Register them under launch_template.* as well so
+			// mapper probes (launch_template.id) hit.
+			for _, inner := range blk.Body.Blocks {
+				if inner.Type != "content" {
+					continue
+				}
+				ckey := blk.Labels[0]
+				if prefix != "" {
+					ckey = prefix + "." + blk.Labels[0]
+				}
+				collectExprs(inner.Body, ckey, out)
+			}
+		}
 		collectExprs(blk.Body, bkey, out)
 	}
 }

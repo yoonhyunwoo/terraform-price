@@ -603,6 +603,9 @@ func mapASG(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.R
 	var lt *parser.Resource
 	if src != nil {
 		lt = refResource(src, idx)
+		if lt == nil {
+			lt = resolveResourceRef(src, res, idx)
+		}
 	}
 	if lt == nil {
 		return nil, "ASG launch_template/launch_configuration reference unresolved", false
@@ -623,8 +626,12 @@ func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]
 		count = int(n)
 	}
 	var it string
-	if lt := lookupExpr(r, []string{"launch_template.id", "launch_template_name"}); lt != nil {
-		if ltRes := refResource(lt, idx); ltRes != nil {
+	if lt := lookupExpr(r, []string{"launch_template.id", "launch_template.name", "launch_template_name"}); lt != nil {
+		ltRes := refResource(lt, idx)
+		if ltRes == nil {
+			ltRes = resolveResourceRef(lt, res, idx)
+		}
+		if ltRes != nil {
 			if s, ok := resStr(ltRes, res, "instance_type"); ok {
 				it = s
 			}
@@ -729,4 +736,42 @@ func elasticacheEngine(e string) string {
 		return "Valkey"
 	}
 	return "Redis"
+}
+
+// resolveResourceRef finds the resource an expression ultimately references,
+// following unresolved locals transitively. This handles the pattern
+//   launch_template { id = local.lt_block.id }
+//   locals { lt_block = { id = one(aws_launch_template.default[*].id) } }
+// where the id VALUE is computed but the TARGET resource is discoverable.
+func resolveResourceRef(expr hcl.Expression, res *resolver.Resolver, idx map[string]*parser.Resource) *parser.Resource {
+	return chaseResourceRef(expr, res, idx, map[string]bool{})
+}
+
+func chaseResourceRef(expr hcl.Expression, res *resolver.Resolver, idx map[string]*parser.Resource, visited map[string]bool) *parser.Resource {
+	for _, t := range expr.Variables() {
+		if len(t) < 2 {
+			continue
+		}
+		root, ok := t[0].(hcl.TraverseRoot)
+		if !ok {
+			continue
+		}
+		attr, ok := t[1].(hcl.TraverseAttr)
+		if !ok {
+			continue
+		}
+		addr := root.Name + "." + attr.Name
+		if r, ok := idx[addr]; ok {
+			return r
+		}
+		if root.Name == "local" && !visited[attr.Name] {
+			visited[attr.Name] = true
+			if la, ok := res.LocalExpr(attr.Name); ok {
+				if r := chaseResourceRef(la, res, idx, visited); r != nil {
+					return r
+				}
+			}
+		}
+	}
+	return nil
 }
