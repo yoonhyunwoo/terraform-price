@@ -715,11 +715,11 @@ func mapNATGateway(r *parser.Resource, res *resolver.Resolver) (*Spec, string, b
 
 func mapVPNGateway(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	return &Spec{
-		ServiceCode: "AmazonEC2",
+		ServiceCode: "AmazonVPC",
 		Filters: []provider.Filter{
-			tm("usagetype", "VPNGateway-Hours"),
+			tm("usagetype", "VPN-Usage-Hours:ipsec.1"),
 		},
-		UsageQty: 730, Count: 1, Label: "VPN Gateway", PreferUnit: "Hrs",
+		UsageQty: 730, Count: 1, Label: "VPN Gateway (billed as VPN connection)",
 	}, "", true
 }
 
