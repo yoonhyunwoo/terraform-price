@@ -55,9 +55,9 @@ With `--baseline`, a `Delta vs baseline` section is appended: per-resource prior
 ## Notes
 
 - **Price cache** — 7 days at `$UserCacheDir/terraform-price/prices.json`. The cache key omits the AWS profile: OnDemand list prices are public, so one file serves every profile. Delete the file to force a full refresh.
-- **Variable resolution** — reads only `terraform.tfvars` and `locals.tf`. Not `*.auto.tfvars`, `terraform.tfvars.json`, `-var` / `-var-file`, or `TF_VAR_*`; affected resources print as unresolved.
+- **Variable resolution** — reads `terraform.tfvars`, then `*.auto.tfvars` (later wins), `variable` defaults from `*.tf`, and `locals` from every `*.tf` (fixpoint). Not `terraform.tfvars.json`, `-var` / `-var-file`, or `TF_VAR_*`; affected resources print as unresolved.
 - **count / for_each** — a resolvable `count` or literal `for_each` multiplies the estimate (`× N` in the spec column); unresolvable ones are priced as one and flagged inline.
-- **Modules** — module blocks are listed under Unsupported; their contents are not expanded.
+- **Modules** — local-path and public-registry modules (`ns/name/provider`, version-pinned via the block's `version`) are expanded recursively with their input values; registry tarballs are cached under `$UserCacheDir/terraform-price/modules/`. `git::` / private / unfetchable sources stay under Unsupported. References to module outputs (`module.x.out`) are not resolved.
 - **Usage-based fees** — data transfer and per-GB processing (e.g. NAT Gateway) are not in the Fixed total; only fixed hourly/GB-month dimensions are.
 - **RDS Proxy vCPU** — derived from instance-class naming (current-gen and legacy t2).
 
@@ -87,7 +87,7 @@ jobs:
       - run: go install github.com/yoonhyunwoo/terraform-price/cmd/terraform-price@main
 ```
 
-The gate fails (exit 1) when the signed monthly delta exceeds the threshold; cost decreases always pass. Any AWS credentials work — the Price List API returns public list prices. Changes inside module blocks (not expanded) surface as not estimated rather than as a number.
+The gate fails (exit 1) when the signed monthly delta exceeds the threshold; cost decreases always pass. Any AWS credentials work — the Price List API returns public list prices. Changes inside modules that cannot be analyzed (git:: / private sources, unresolved module outputs) surface as not estimated rather than as a number.
 
 ## License
 

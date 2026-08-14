@@ -96,9 +96,10 @@ func resolveVersion(rs *registrySource, pin string) (string, error) {
 	return vers[0], nil
 }
 
-// satisfiesPessimistic implements terraform's ~> constraint: every
-// component but the last specified must match exactly, and the last
-// specified component may increase.
+// satisfiesPessimistic implements terraform's ~> constraint:
+//   - "~> 5"     means >= 5.0.0, < 6.0.0 (major must match)
+//   - "~> 5.5"   means >= 5.5.0, < 6.0.0 (minor may increase, major matches)
+//   - "~> 5.5.1" means >= 5.5.1, < 5.6.0 (patch may increase, major.minor match)
 func satisfiesPessimistic(want, got []string) bool {
 	if len(got) < len(want) {
 		return false
@@ -107,6 +108,9 @@ func satisfiesPessimistic(want, got []string) bool {
 		if want[i] != got[i] {
 			return false
 		}
+	}
+	if len(want) == 1 {
+		return got[0] == want[0]
 	}
 	return numAtLeast(got[len(want)-1], want[len(want)-1])
 }
