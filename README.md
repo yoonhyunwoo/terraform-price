@@ -25,7 +25,7 @@
 소스에서 빌드·설치한다.
 
 ```sh
-git clone <repo> && cd terraform-price
+git clone https://github.com/yoonhyunwoo/terraform-price && cd terraform-price
 go install ./cmd/terraform-price
 ```
 
