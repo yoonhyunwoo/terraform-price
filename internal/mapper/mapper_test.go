@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
@@ -28,8 +27,8 @@ func idxOf(rs []*parser.Resource) map[string]*parser.Resource {
 
 func filterVal(spec *Spec, field string) string {
 	for _, f := range spec.Filters {
-		if f.Field != nil && *f.Field == field {
-			return aws.ToString(f.Value)
+		if f.Field == field {
+			return f.Value
 		}
 	}
 	return ""

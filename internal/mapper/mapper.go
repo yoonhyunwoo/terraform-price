@@ -5,13 +5,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	ptypes "github.com/aws/aws-sdk-go-v2/service/pricing/types"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/provider"
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
 
@@ -90,7 +89,7 @@ var freeTypes = map[string]struct{}{
 
 type Spec struct {
 	ServiceCode string
-	Filters     []ptypes.Filter
+	Filters     []provider.Filter
 	UsageQty    float64
 	Count       int
 	Label       string
@@ -101,7 +100,7 @@ type Spec struct {
 type Rate struct {
 	Label       string
 	ServiceCode string
-	Filters     []ptypes.Filter
+	Filters     []provider.Filter
 	PreferUnit  string
 	DisplayMult float64
 	DisplayUnit string
@@ -131,8 +130,8 @@ var regionToUsagePrefix = map[string]string{
 	"eu-central-1":   "EUC1",
 }
 
-func tm(field, value string) ptypes.Filter {
-	return ptypes.Filter{Type: ptypes.FilterTypeTermMatch, Field: aws.String(field), Value: aws.String(value)}
+func tm(field, value string) provider.Filter {
+	return provider.Filter{Field: field, Value: value}
 }
 
 func usageType(region, base string) (string, bool) {
@@ -232,7 +231,7 @@ func refResource(expr hcl.Expression, idx map[string]*parser.Resource) *parser.R
 func ec2InstanceSpec(it, loc, label string, count int) *Spec {
 	return &Spec{
 		ServiceCode: "AmazonEC2",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("instanceType", it),
 			tm("location", loc),
 			tm("operatingSystem", "Linux"),
@@ -308,6 +307,9 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	case "aws_fsx_lustre_filesystem":
 		spec, note, ok = mapFSxLustre(r, res, loc, region)
 	default:
+		if p, _, _ := strings.Cut(r.Type, "_"); p != "aws" {
+			return KindUnsupported, nil, "unknown provider " + p + " (only aws is priced)"
+		}
 		return KindUnsupported, nil, "unsupported resource type (not priced)"
 	}
 	if !ok {
@@ -327,7 +329,7 @@ func mapEC2(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 	}
 	spec := ec2InstanceSpec(it, loc, it, 1)
 	for i, f := range spec.Filters {
-		if f.Field != nil && *f.Field == "tenancy" {
+		if f.Field == "tenancy" {
 			spec.Filters[i] = tm("tenancy", tenancy)
 		}
 	}
@@ -346,7 +348,7 @@ func mapRDS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 	}
 	return &Spec{
 		ServiceCode: "AmazonRDS",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("instanceType", ic),
 			tm("location", loc),
 			tm("databaseEngine", rdsEngine(engine)),
@@ -369,7 +371,7 @@ func mapAuroraInstance(r *parser.Resource, res *resolver.Resolver, idx map[strin
 	}
 	return &Spec{
 		ServiceCode: "AmazonRDS",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("instanceType", ic),
 			tm("location", loc),
 			tm("databaseEngine", auroraEngine(engine)),
@@ -388,7 +390,7 @@ func mapAuroraCluster(r *parser.Resource, res *resolver.Resolver, loc, region st
 		}
 		return Rate{
 			Label: label, ServiceCode: "AmazonRDS",
-			Filters:    []ptypes.Filter{tm("usagetype", ut), tm("location", loc)},
+			Filters:    []provider.Filter{tm("usagetype", ut), tm("location", loc)},
 			PreferUnit: "GB-Mo", DisplayUnit: "GB-mo",
 		}, true
 	}
@@ -407,7 +409,7 @@ func mapAuroraCluster(r *parser.Resource, res *resolver.Resolver, loc, region st
 		ioUT, _ := usageType(region, "Aurora:StorageIOUsage")
 		rates = []Rate{stor, {
 			Label: "I/O", ServiceCode: "AmazonRDS",
-			Filters:     []ptypes.Filter{tm("usagetype", ioUT), tm("location", loc)},
+			Filters:     []provider.Filter{tm("usagetype", ioUT), tm("location", loc)},
 			PreferUnit:  "IOs",
 			DisplayMult: 1_000_000, DisplayUnit: "1M I/O",
 		}}
@@ -423,7 +425,7 @@ func mapSecret(r *parser.Resource, res *resolver.Resolver, loc, region string) (
 	}
 	return &Spec{
 		ServiceCode: "AWSSecretsManager",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("usagetype", ut),
 			tm("location", loc),
 		},
@@ -436,7 +438,7 @@ func mapDBProxy(r *parser.Resource, res *resolver.Resolver, idx map[string]*pars
 	if !ok {
 		return nil, "RDS Proxy usagetype (region) unresolved", false
 	}
-	filters := []ptypes.Filter{tm("usagetype", ut), tm("location", loc)}
+	filters := []provider.Filter{tm("usagetype", ut), tm("location", loc)}
 	if vcpu := proxyTargetVCPU(r, res, idx); vcpu > 0 {
 		return &Spec{
 			ServiceCode: "AmazonRDS", Filters: filters,
@@ -528,7 +530,7 @@ func mapDBInstance(r *parser.Resource, res *resolver.Resolver, loc, serviceCode 
 	}
 	return &Spec{
 		ServiceCode: serviceCode,
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("instanceType", ic),
 			tm("location", loc),
 			tm("deploymentOption", "Single-AZ"),
@@ -548,7 +550,7 @@ func mapRedshift(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec,
 	}
 	return &Spec{
 		ServiceCode: "AmazonRedshift",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("instanceType", it),
 			tm("location", loc),
 		},
@@ -567,7 +569,7 @@ func mapOpenSearch(r *parser.Resource, res *resolver.Resolver, loc string) (*Spe
 	}
 	return &Spec{
 		ServiceCode: "AmazonOpenSearchService",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("instanceType", it),
 			tm("location", loc),
 		},
@@ -587,7 +589,7 @@ func mapMSK(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 	}
 	return &Spec{
 		ServiceCode: "AmazonMSK",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("computeFamily", computeFamily),
 			tm("operation", "RunBroker"),
 			tm("location", loc),
@@ -614,7 +616,7 @@ func mapElastiCache(r *parser.Resource, res *resolver.Resolver, loc string) (*Sp
 	}
 	return &Spec{
 		ServiceCode: "AmazonElastiCache",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("instanceType", nt),
 			tm("location", loc),
 			tm("cacheEngine", engine),
@@ -634,7 +636,7 @@ func mapEBS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 	}
 	return &Spec{
 		ServiceCode: "AmazonEC2",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("volumeApiName", vtype),
 			tm("location", loc),
 		},
@@ -703,7 +705,7 @@ func mapNATGateway(r *parser.Resource, res *resolver.Resolver, loc, region strin
 	}
 	return &Spec{
 		ServiceCode: "AmazonEC2",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("usagetype", ut),
 			tm("location", loc),
 		},
@@ -718,7 +720,7 @@ func mapVPNGateway(r *parser.Resource, res *resolver.Resolver, loc, region strin
 	}
 	return &Spec{
 		ServiceCode: "AmazonEC2",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("usagetype", ut),
 			tm("location", loc),
 		},
@@ -734,7 +736,7 @@ func mapLB(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, strin
 	lbt = strings.ToUpper(lbt[:1]) + lbt[1:]
 	return &Spec{
 		ServiceCode: "AmazonElasticLoadBalancing",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("loadBalancerType", lbt),
 			tm("location", loc),
 		},
@@ -753,7 +755,7 @@ func mapFSxLustre(r *parser.Resource, res *resolver.Resolver, loc, region string
 	}
 	return &Spec{
 		ServiceCode: "AmazonFSx",
-		Filters: []ptypes.Filter{
+		Filters: []provider.Filter{
 			tm("fileSystemType", "LUSTRE"),
 			tm("usagetype", ut),
 			tm("location", loc),

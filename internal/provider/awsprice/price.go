@@ -1,4 +1,4 @@
-package price
+package awsprice
 
 import (
 	"context"
@@ -10,24 +10,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/pricing"
 	ptypes "github.com/aws/aws-sdk-go-v2/service/pricing/types"
+
+	"github.com/yoonhyunwoo/terraform-price/internal/provider"
 )
-
-type Pricer interface {
-	UnitPrice(ctx context.Context, serviceCode string, filters []ptypes.Filter, preferUnit string) (float64, string, error)
-}
-
-type priceListDoc struct {
-	Terms struct {
-		OnDemand map[string]struct {
-			PriceDimensions map[string]struct {
-				Unit         string `json:"unit"`
-				PricePerUnit struct {
-					USD string `json:"USD"`
-				} `json:"pricePerUnit"`
-			} `json:"priceDimensions"`
-		} `json:"OnDemand"`
-	} `json:"terms"`
-}
 
 type Client struct {
 	client *pricing.Client
@@ -48,15 +33,36 @@ func NewClient(ctx context.Context, profile string) (*Client, error) {
 	return &Client{client: client}, nil
 }
 
-func (c *Client) UnitPrice(ctx context.Context, serviceCode string, filters []ptypes.Filter, preferUnit string) (float64, string, error) {
+func (c *Client) UnitPrice(ctx context.Context, q provider.Query) (float64, string, error) {
+	filters := make([]ptypes.Filter, len(q.Filters))
+	for i, f := range q.Filters {
+		filters[i] = ptypes.Filter{
+			Type:  ptypes.FilterTypeTermMatch,
+			Field: aws.String(f.Field),
+			Value: aws.String(f.Value),
+		}
+	}
 	out, err := c.client.GetProducts(ctx, &pricing.GetProductsInput{
-		ServiceCode: aws.String(serviceCode),
+		ServiceCode: aws.String(q.Service),
 		Filters:     filters,
 	})
 	if err != nil {
 		return 0, "", err
 	}
-	return pickPrice(out.PriceList, serviceCode, preferUnit)
+	return pickPrice(out.PriceList, q.Service, q.PreferUnit)
+}
+
+type priceListDoc struct {
+	Terms struct {
+		OnDemand map[string]struct {
+			PriceDimensions map[string]struct {
+				Unit         string `json:"unit"`
+				PricePerUnit struct {
+					USD string `json:"USD"`
+				} `json:"pricePerUnit"`
+			} `json:"priceDimensions"`
+		} `json:"OnDemand"`
+	} `json:"terms"`
 }
 
 func pickPrice(rows []string, serviceCode, preferUnit string) (float64, string, error) {

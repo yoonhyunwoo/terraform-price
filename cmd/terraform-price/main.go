@@ -11,7 +11,8 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/mapper"
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
-	"github.com/yoonhyunwoo/terraform-price/internal/price"
+	"github.com/yoonhyunwoo/terraform-price/internal/provider"
+	"github.com/yoonhyunwoo/terraform-price/internal/provider/awsprice"
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -55,17 +56,17 @@ func main() {
 		idx[r.Type+"."+r.Name] = r
 	}
 
-	client, err := price.NewClient(ctx, profile)
+	client, err := awsprice.NewClient(ctx, profile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "aws config:", err)
 		os.Exit(1)
 	}
 
-	pricer := price.Pricer(client)
-	var cacher *price.Cached
+	var pricer provider.Pricer = client
+	var cacher *provider.Cached
 	if !*noCacheFlag {
 		if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
-			cacher = price.NewCached(client, filepath.Join(cacheDir, "terraform-price", "prices.json"), price.CacheTTL)
+			cacher = provider.NewCached(client, filepath.Join(cacheDir, "terraform-price", "prices.json"), provider.CacheTTL)
 			pricer = cacher
 		}
 	}
@@ -98,7 +99,7 @@ func main() {
 		if metaNote != "" {
 			spec.Label += " (" + metaNote + ")"
 		}
-		p, unit, err := pricer.UnitPrice(ctx, spec.ServiceCode, spec.Filters, spec.PreferUnit)
+		p, unit, err := pricer.UnitPrice(ctx, provider.Query{Service: spec.ServiceCode, Filters: spec.Filters, PreferUnit: spec.PreferUnit})
 		if err != nil {
 			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "price lookup failed: " + err.Error()})
 			continue
@@ -118,13 +119,13 @@ func main() {
 	}
 }
 
-func variableItem(ctx context.Context, pricer price.Pricer, addr, typ, note string, spec *mapper.Spec) output.CostItem {
+func variableItem(ctx context.Context, pricer provider.Pricer, addr, typ, note string, spec *mapper.Spec) output.CostItem {
 	item := output.CostItem{Kind: output.Variable, Addr: addr, Type: typ, Note: note}
 	if spec == nil {
 		return item
 	}
 	for _, rt := range spec.Rates {
-		p, unit, err := pricer.UnitPrice(ctx, rt.ServiceCode, rt.Filters, rt.PreferUnit)
+		p, unit, err := pricer.UnitPrice(ctx, provider.Query{Service: rt.ServiceCode, Filters: rt.Filters, PreferUnit: rt.PreferUnit})
 		if err != nil {
 			continue
 		}

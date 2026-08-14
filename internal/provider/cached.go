@@ -1,4 +1,4 @@
-package price
+package provider
 
 import (
 	"context"
@@ -8,9 +8,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	ptypes "github.com/aws/aws-sdk-go-v2/service/pricing/types"
 )
 
 const CacheTTL = 7 * 24 * time.Hour
@@ -35,12 +32,12 @@ func NewCached(inner Pricer, path string, ttl time.Duration) *Cached {
 	return c
 }
 
-func (c *Cached) UnitPrice(ctx context.Context, serviceCode string, filters []ptypes.Filter, preferUnit string) (float64, string, error) {
-	key := cacheKey(serviceCode, filters, preferUnit)
+func (c *Cached) UnitPrice(ctx context.Context, q Query) (float64, string, error) {
+	key := cacheKey(q)
 	if e, ok := c.data[key]; ok && time.Since(time.Unix(e.CachedAt, 0)) <= c.ttl {
 		return e.Price, e.Unit, nil
 	}
-	p, unit, err := c.inner.UnitPrice(ctx, serviceCode, filters, preferUnit)
+	p, unit, err := c.inner.UnitPrice(ctx, q)
 	if err != nil {
 		return 0, "", err
 	}
@@ -71,11 +68,11 @@ func (c *Cached) load() {
 	json.Unmarshal(b, &c.data)
 }
 
-func cacheKey(serviceCode string, filters []ptypes.Filter, preferUnit string) string {
-	parts := make([]string, 0, len(filters))
-	for _, f := range filters {
-		parts = append(parts, aws.ToString(f.Field)+"="+aws.ToString(f.Value))
+func cacheKey(q Query) string {
+	parts := make([]string, 0, len(q.Filters))
+	for _, f := range q.Filters {
+		parts = append(parts, f.Field+"="+f.Value)
 	}
 	sort.Strings(parts)
-	return serviceCode + "|" + strings.Join(parts, ",") + "|" + preferUnit
+	return q.Service + "|" + strings.Join(parts, ",") + "|" + q.PreferUnit
 }
