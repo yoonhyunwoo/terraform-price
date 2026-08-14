@@ -16,18 +16,33 @@ into a neutral API cost them a multi-year migration) is why the boundary is enfo
 Never name the adapter package `aws` or `pricing` — both collide with SDK imports
 (`aws-sdk-go-v2/aws`, `.../service/pricing`).
 
+## Region dialect lives in awsprice — compose before the cache
+
+`internal/provider/awsprice/regions.go` owns the AWS region vocabulary: `regionToLocation`,
+`regionToUsagePrefix`, and the `usEast1UnprefixedUsagetypes` exception set. The tables were
+derived from the live Price List API (`GetProducts AmazonEC2`, 2026-08-14) — not from memory —
+because the vendor data has quirks: `eu-central-1`'s location string is `EU (Frankfurt)`, and a
+few us-east-1 product families (Aurora storage, NAT gateway) ship unprefixed usagetypes while
+others (Secrets Manager, RDS Proxy) are `USE1-` prefixed. Mappers carry the neutral region id in
+`Spec.Region` / `Rate.Region` and pass unprefixed usagetype bases; `awsprice.Composer` injects the
+location filter and the usagetype prefix. Wiring order in `buildPricer` is load-bearing: the
+Composer must sit **above** the cache (`NewComposer(NewCached(client))`), never below — the cache
+key is computed from the composed query, and a Composer below the cache would key on region-less
+queries so different regions collide on one entry. `TestBuildPricerComposesBeforeCache` guards
+the ordering; `TestCacheKeyFormatStable` guards the key rendering.
+
 ## Price cache is shared across AWS profiles — keep the profile out of the cache key
 
 `internal/provider/cached.go` keys cached results by
-`serviceCode | location(region) filter | spec filters | preferUnit` and intentionally omits the
-AWS profile. AWS OnDemand list prices are public and depend only on region + resource spec,
-never on the querying account — discounts (RI / Savings Plan / EDP) apply later at billing, not
-at the Price List API (see the caveat printed in `output.go`). One cache file therefore correctly
-serves every profile; adding the profile to the key would be a wrong "fix" that duplicates
-identical prices. TTL is 7 days (`provider.CacheTTL`); `--no-cache` bypasses the cache for a run,
-and deleting `$UserCacheDir/terraform-price/prices.json` forces a full refresh. The key string
-format is load-bearing (existing cache files must keep hitting) — `TestCacheKeyFormatStable`
-guards it.
+`serviceCode | sorted spec filters (incl. the location filter awsprice composes) | preferUnit`
+and intentionally omits the AWS profile. AWS OnDemand list prices are public and depend only on
+region + resource spec, never on the querying account — discounts (RI / Savings Plan / EDP)
+apply later at billing, not at the Price List API (see the caveat printed in `output.go`). One
+cache file therefore correctly serves every profile; adding the profile to the key would be a
+wrong "fix" that duplicates identical prices. TTL is 7 days (`provider.CacheTTL`);
+`--no-cache` bypasses the cache for a run, and deleting
+`$UserCacheDir/terraform-price/prices.json` forces a full refresh. The key string format is
+load-bearing (existing cache files must keep hitting) — `TestCacheKeyFormatStable` guards it.
 
 ## Var / locals resolution is limited to two hardcoded files
 

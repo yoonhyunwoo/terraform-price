@@ -40,7 +40,7 @@ terraform-price --profile muhayu-hr ./terraform/rds/monster/monsterp
 | `--no-cache` | `false` | Bypass the price cache for this run |
 | `[dir]` | `.` | Target Terraform directory (positional) |
 
-Region comes from tfvars `aws_region` (default `ap-northeast-2`). The report title comes from tfvars `origin_service_name` (default: directory name).
+Region comes from tfvars `aws_region` (default `ap-northeast-2`). All 39 regions the AWS Price List API covers are supported. The report title comes from tfvars `origin_service_name` (default: directory name).
 
 ## Report
 

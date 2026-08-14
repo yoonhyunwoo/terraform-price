@@ -92,3 +92,53 @@ func TestRegionTablesConsistent(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeUse1FamilyExceptions(t *testing.T) {
+	cases := []struct {
+		base, want string
+	}{
+		{"Aurora:StorageUsage", "Aurora:StorageUsage"},
+		{"Aurora:StorageIOUsage", "Aurora:StorageIOUsage"},
+		{"NatGateway-Hours", "NatGateway-Hours"},
+		{"AWSSecretsManager-Secrets", "USE1-AWSSecretsManager-Secrets"},
+		{"RDS:ProxyUsage", "USE1-RDS:ProxyUsage"},
+	}
+	for _, c := range cases {
+		q, err := compose(provider.Query{Service: "AmazonEC2", Region: "us-east-1",
+			Filters: []provider.Filter{{Field: "usagetype", Value: c.base}}})
+		if err != nil {
+			t.Fatalf("%s: %v", c.base, err)
+		}
+		if got, _ := filterVal(q, "usagetype"); got != c.want {
+			t.Errorf("us-east-1 %s: want %q, got %q", c.base, c.want, got)
+		}
+		if loc, _ := filterVal(q, "location"); loc != "US East (N. Virginia)" {
+			t.Errorf("us-east-1 location: got %q", loc)
+		}
+	}
+}
+
+func TestComposeDerivedRegionVocabulary(t *testing.T) {
+	// Spot-check values frozen from the live Price List API.
+	for region, wantLoc := range map[string]string{
+		"us-east-2":    "US East (Ohio)",
+		"ap-south-1":   "Asia Pacific (Mumbai)",
+		"eu-west-2":    "EU (London)",
+		"eu-central-1": "EU (Frankfurt)",
+	} {
+		q, err := compose(provider.Query{Region: region})
+		if err != nil {
+			t.Fatalf("%s: %v", region, err)
+		}
+		if got, _ := filterVal(q, "location"); got != wantLoc {
+			t.Errorf("%s location: want %q, got %q", region, wantLoc, got)
+		}
+	}
+	if _, err := compose(provider.Query{Region: "eu-central-1", Filters: []provider.Filter{{Field: "usagetype", Value: "RDS:ProxyUsage"}}}); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := compose(provider.Query{Region: "ap-south-1", Filters: []provider.Filter{{Field: "usagetype", Value: "NatGateway-Hours"}}})
+	if got, _ := filterVal(q, "usagetype"); got != "APS3-NatGateway-Hours" {
+		t.Errorf("Mumbai NAT prefix: want APS3-NatGateway-Hours, got %q", got)
+	}
+}
