@@ -9,6 +9,7 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider"
+	"github.com/yoonhyunwoo/terraform-price/internal/refres"
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -30,6 +31,13 @@ func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.
 	for _, r := range resources {
 		idx[r.Type+"."+r.Name] = r
 	}
+
+	// Resolve cross-resource references and inject into the resolver
+	rr := refres.New(resources, res)
+	if err := rr.Verify(); err != nil {
+		return nil, fmt.Errorf("reference cycle: %w", err)
+	}
+	res.SetResources(rr.AllResolved())
 
 	var items []output.CostItem
 	for _, r := range resources {

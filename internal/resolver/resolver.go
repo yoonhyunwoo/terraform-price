@@ -12,8 +12,9 @@ import (
 )
 
 type Resolver struct {
-	vars   map[string]cty.Value
-	locals map[string]cty.Value
+	vars      map[string]cty.Value
+	locals    map[string]cty.Value
+	resources map[string]map[string]cty.Value
 }
 
 func NewResolver(dir string) *Resolver {
@@ -88,10 +89,30 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 		return navigate(t[1:], cty.ObjectVal(r.vars))
 	case "local":
 		return navigate(t[1:], cty.ObjectVal(r.locals))
+	case "data", "module", "terraform", "path", "cwd", "each", "count":
+		return cty.NilVal, false
+	}
+	// Resource reference: aws_instance.a.instance_type
+	if len(t) >= 2 {
+		if name, ok := t[1].(hcl.TraverseAttr); ok {
+			return r.resolveResourceTraversal(root, name.Name, t[2:])
+		}
 	}
 	return cty.NilVal, false
 }
 
+
+func (r *Resolver) resolveResourceTraversal(root string, name string, rest []hcl.Traverser) (cty.Value, bool) {
+	if r.resources == nil {
+		return cty.NilVal, false
+	}
+	attrs, ok := r.resources[root+"."+name]
+	if !ok {
+		return cty.NilVal, false
+	}
+	obj := cty.ObjectVal(attrs)
+	return navigate(rest, obj)
+}
 func rootName(tr hcl.Traverser) (string, bool) {
 	if root, ok := tr.(hcl.TraverseRoot); ok {
 		return root.Name, true
@@ -150,3 +171,23 @@ func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 	return val, true
 }
 
+
+// SetResources registers parsed resources for cross-resource reference
+// resolution (e.g. aws_instance.a.instance_type). Call after ParseDir.
+func (r *Resolver) SetResources(resources map[string]map[string]cty.Value) {
+	r.resources = resources
+}
+
+// ResolveResourceAttr resolves an attribute of another resource.
+// Returns false if the resource or attribute is not resolvable.
+func (r *Resolver) ResolveResourceAttr(typeName, name, attr string) (cty.Value, bool) {
+	attrs, ok := r.resources[typeName+"."+name]
+	if !ok {
+		return cty.NilVal, false
+	}
+	v, ok := attrs[attr]
+	if !ok || !v.IsKnown() || v.IsNull() {
+		return cty.NilVal, false
+	}
+	return v, true
+}

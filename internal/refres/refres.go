@@ -222,3 +222,12 @@ func navigateAttrs(attrs map[string]cty.Value, steps []hcl.Traverser) (cty.Value
 	}
 	return val, true
 }
+
+// AllResolved returns all resolved resource attributes.
+// Call after ResolveResource for each resource.
+func (r *RefResolver) AllResolved() map[string]map[string]cty.Value {
+	for addr := range r.resources {
+		r.ResolveResource(addr)
+	}
+	return r.resolved
+}
