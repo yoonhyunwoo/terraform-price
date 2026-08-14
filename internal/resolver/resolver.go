@@ -396,6 +396,13 @@ func (r *Resolver) ResolveLocal(name string) (cty.Value, bool) {
 	return v, true
 }
 
+// ValueMaps exposes the resolved var and local values so callers building
+// their own EvalContext (e.g. refres resource-expression evaluation) can
+// seed it with the same base scope.
+func (r *Resolver) ValueMaps() (vars, locals map[string]cty.Value) {
+	return r.vars, r.locals
+}
+
 // LocalExpr returns the unevaluated expression of a local that has not
 // resolved (typically because it references computed resource attrs).
 // Used for transitive resource discovery without value resolution.
