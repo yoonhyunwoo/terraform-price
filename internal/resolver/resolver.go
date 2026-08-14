@@ -47,10 +47,7 @@ func NewResolver(dir string) *Resolver {
 	r.loadVarDefaults(dir)
 	// Collect locals blocks from ALL .tf files (not just locals.tf) —
 	// real repos spread locals across many files.
-	type localAttr struct {
-		expr hcl.Expression
-	}
-	pending := map[string]localAttr{}
+	r.pendingLocs = map[string]hcl.Expression{}
 	entries, err := os.ReadDir(dir)
 	if err == nil {
 		for _, e := range entries {
@@ -70,7 +67,7 @@ func NewResolver(dir string) *Resolver {
 			for _, blk := range content.Blocks {
 				if attrs, d := blk.Body.JustAttributes(); !d.HasErrors() {
 					for name, attr := range attrs {
-						pending[name] = localAttr{expr: attr.Expr}
+						r.pendingLocs[name] = attr.Expr
 					}
 				}
 			}
@@ -79,11 +76,7 @@ func NewResolver(dir string) *Resolver {
 	// Iterative fixpoint: locals can reference other locals across files.
 	// Locals referencing resources stay pending until SetResources +
 	// RetryLocals (analyze iterates both to a fixpoint).
-	r.pendingLocs = make(map[string]hcl.Expression, len(pending))
-	for name, la := range pending {
-		r.pendingLocs[name] = la.expr
-	}
-	for r.retryLocals() {
+	for r.RetryLocals() {
 		// iterate: a pass may unlock locals that referenced other locals
 		// resolved later in the same pass (map order is random)
 	}
@@ -93,10 +86,6 @@ func NewResolver(dir string) *Resolver {
 // RetryLocals re-attempts pending locals (e.g. those referencing resources
 // after SetResources). Returns true if any new local resolved.
 func (r *Resolver) RetryLocals() bool {
-	return r.retryLocals()
-}
-
-func (r *Resolver) retryLocals() bool {
 	changed := false
 	for name, expr := range r.pendingLocs {
 		if val, d := expr.Value(r.scope()); !d.HasErrors() {
@@ -214,7 +203,6 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 	}
 	return cty.NilVal, false
 }
-
 
 func (r *Resolver) resolveResourceTraversal(root string, name string, rest []hcl.Traverser) (cty.Value, bool) {
 	if r.resources == nil {
@@ -341,7 +329,6 @@ func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 	}
 	return val, true
 }
-
 
 // SetResources registers resolved resource attributes and builds the
 // resource TYPE-rooted evaluation scope (aws_launch_template = {this = {...}})
