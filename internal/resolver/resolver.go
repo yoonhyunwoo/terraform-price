@@ -198,6 +198,8 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 		return navigate(t[1:], cty.ObjectVal(r.vars))
 	case "local":
 		return navigate(t[1:], cty.ObjectVal(r.locals))
+	// Known-unknowns, unresolved by design and reported as such — never guessed:
+	// provider-computed attrs (id/arn/latest_version), data.*, module.*, each.key.
 	case "data", "module", "terraform", "path", "cwd", "each", "count":
 		return cty.NilVal, false
 	}
