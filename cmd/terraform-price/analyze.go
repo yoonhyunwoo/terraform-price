@@ -92,6 +92,11 @@ func (ds *dirScope) registerModules(dir, region, prefix string, depth int) {
 		ds.res.RegisterModule(m.Name, mi.outputsFn)
 		ds.children = append(ds.children, mi)
 	}
+	// Settle in registration order so later modules see earlier ones'
+	// outputs; scope() itself must not force (mid-build hazard).
+	for _, mi := range ds.children {
+		ds.res.ForceModule(mi.m.Name)
+	}
 }
 
 func (ds *dirScope) fixpoint() {

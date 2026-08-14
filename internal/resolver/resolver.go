@@ -39,6 +39,12 @@ func (r *Resolver) RegisterModule(name string, outputs func() map[string]cty.Val
 	r.modules[name] = &moduleEntry{fn: outputs}
 }
 
+// ForceModule settles a module's outputs now; the analyzer forces in
+// registration order so later modules see earlier ones' outputs in scope().
+func (r *Resolver) ForceModule(name string) {
+	r.moduleOutputs(name)
+}
+
 func (r *Resolver) moduleOutputs(name string) (map[string]cty.Value, bool) {
 	e, ok := r.modules[name]
 	if !ok {
@@ -51,12 +57,11 @@ func (r *Resolver) moduleOutputs(name string) (map[string]cty.Value, bool) {
 		e.running = true
 		e.vals = e.fn()
 		e.running = false
-		e.done = true
+		// nil (mid-build re-entry or unfetchable) stays retryable — the
+		// build in flight may still produce outputs.
+		e.done = e.vals != nil
 	}
-	if e.vals == nil {
-		return nil, false
-	}
-	return e.vals, true
+	return e.vals, e.vals != nil
 }
 
 // NewResolver builds a resolver over a Terraform directory.
@@ -192,16 +197,17 @@ func (r *Resolver) scope() *hcl.EvalContext {
 		}
 	}
 	// A `module` object makes template-nested refs ("${module.m.out}-x") work.
-	if len(r.modules) > 0 {
-		mods := make(map[string]cty.Value, len(r.modules))
-		for name := range r.modules {
-			if outs, ok := r.moduleOutputs(name); ok {
-				mods[name] = cty.ObjectVal(outs)
-			}
+	// Only settled modules are included — forcing here could build a sibling
+	// mid-build and silently drop its inputs; the analyzer forces modules
+	// explicitly instead.
+	mods := make(map[string]cty.Value, len(r.modules))
+	for name, e := range r.modules {
+		if e.done && e.vals != nil {
+			mods[name] = cty.ObjectVal(e.vals)
 		}
-		if len(mods) > 0 {
-			ctx.Variables["module"] = cty.ObjectVal(mods)
-		}
+	}
+	if len(mods) > 0 {
+		ctx.Variables["module"] = cty.ObjectVal(mods)
 	}
 	return ctx
 }
