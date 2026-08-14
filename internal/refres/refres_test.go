@@ -136,3 +136,75 @@ resource "aws_launch_template" "b" {
 		}
 	}
 }
+
+// Nested expressions (function calls, splats, templates) that reference
+// other resources evaluate against the on-demand resource scope instead
+// of failing to resolve.
+func TestNestedExprOverResources(t *testing.T) {
+	r := setup(t, map[string]string{
+		"main.tf": `
+resource "aws_instance" "a" {
+  instance_type = "t3.micro"
+  name          = "web"
+  names         = ["alpha", "beta"]
+}
+resource "aws_launch_template" "lt" {
+  description = "lt-${aws_instance.a.name}"
+  first       = element(aws_instance.a.names[*], 0)
+  tags        = merge({env = "dev"}, {role = aws_instance.a.name})
+}
+`,
+	})
+	if err := r.Verify(); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if v, ok := r.ResolveAttr("aws_launch_template.lt", "description"); !ok || v.AsString() != "lt-web" {
+		t.Fatalf(`description: want lt-web/true, got %v/%v`, v, ok)
+	}
+	if v, ok := r.ResolveAttr("aws_launch_template.lt", "first"); !ok || v.AsString() != "alpha" {
+		t.Fatalf(`first: want alpha/true, got %v/%v`, v, ok)
+	}
+	if v, ok := r.ResolveAttr("aws_launch_template.lt", "tags"); !ok || !v.Type().IsObjectType() {
+		t.Fatalf(`tags: want object/true, got %v/%v`, v, ok)
+	} else if e, a := v.GetAttr("env"), v.GetAttr("role"); e.AsString() != "dev" || a.AsString() != "web" {
+		t.Fatalf(`tags: want env=dev role=web, got env=%v role=%v`, e, a)
+	}
+}
+
+// try() over a resource reference falls back when the referenced
+// attribute does not exist on the resolved object.
+func TestTryFallbackOverResourceRef(t *testing.T) {
+	r := setup(t, map[string]string{
+		"main.tf": `
+resource "aws_instance" "a" {
+  instance_type = "t3.micro"
+}
+resource "aws_launch_template" "lt" {
+  instance_type = try(aws_instance.a.gpu_type, "t3.micro")
+}
+`,
+	})
+	v, ok := r.ResolveAttr("aws_launch_template.lt", "instance_type")
+	if !ok || v.AsString() != "t3.micro" {
+		t.Fatalf(`want t3.micro/true, got %v/%v`, v, ok)
+	}
+}
+
+// A [0] index over a single (count-based) resource object resolves to
+// the object itself.
+func TestZeroIndexSingleResource(t *testing.T) {
+	r := setup(t, map[string]string{
+		"main.tf": `
+resource "aws_instance" "a" {
+  instance_type = "t3.micro"
+}
+resource "aws_launch_template" "lt" {
+  instance_type = aws_instance.a[0].instance_type
+}
+`,
+	})
+	v, ok := r.ResolveAttr("aws_launch_template.lt", "instance_type")
+	if !ok || v.AsString() != "t3.micro" {
+		t.Fatalf(`want t3.micro/true, got %v/%v`, v, ok)
+	}
+}

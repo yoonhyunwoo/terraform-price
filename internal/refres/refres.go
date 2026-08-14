@@ -12,15 +12,27 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 
+	"github.com/yoonhyunwoo/terraform-price/internal/funcs"
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
+
+const nonResourceRoot = "var local data module terraform path cwd each count self"
+
+func isNonResourceRoot(name string) bool {
+	for _, n := range strings.Fields(nonResourceRoot) {
+		if name == n {
+			return true
+		}
+	}
+	return false
+}
 
 type RefResolver struct {
 	resources map[string]*parser.Resource
 	res       *resolver.Resolver
 
-	// resolved caches attribute values: "aws_instance.a" → {"instance_type": cty.StringVal("t3.micro")}
+	// resolved caches attribute values: "aws_instance.a" -> {"instance_type": cty.StringVal("t3.micro")}
 	resolved map[string]map[string]cty.Value
 	// resolving tracks in-flight addresses for cycle detection
 	resolving map[string]bool
@@ -47,17 +59,17 @@ func (r *RefResolver) Verify() error {
 	check = func(addr string, path []string) error {
 		for _, p := range path {
 			if p == addr {
-				return fmt.Errorf("reference cycle: %s", strings.Join(append(path, addr), " -> "))
+				cycle := append(append([]string{}, path...), addr)
+				return fmt.Errorf("reference cycle: %s", strings.Join(cycle, " -> "))
 			}
 		}
 		if visited[addr] {
 			return nil
 		}
 		visited[addr] = true
-		next := make([]string, len(path)+1)
-		copy(next, path)
-		next[len(path)] = addr
 		for _, dep := range r.deps(addr) {
+			// copy: siblings must not share the appended backing array
+			next := append(append([]string{}, path...), addr)
 			if err := check(dep, next); err != nil {
 				return err
 			}
@@ -157,86 +169,127 @@ func (r *RefResolver) ResolveResource(addr string) map[string]cty.Value {
 	return attrs
 }
 
-// resolveExpr evaluates an expression. Scope traversals to other resources
-// are resolved recursively; everything else goes to the base resolver.
+// resolveExpr evaluates an expression. Direct scope traversals to other
+// resources are resolved recursively; any other expression (function call,
+// ternary, template, splat) is evaluated against a scope that includes the
+// resource objects it references.
 func (r *RefResolver) resolveExpr(expr hcl.Expression, fromAddr string) (cty.Value, bool) {
 	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
 		t := hcl.Traversal(ste.Traversal)
 		if len(t) >= 2 {
-			if root, ok := t[0].(hcl.TraverseRoot); ok {
-				if root.Name != "var" && root.Name != "local" && root.Name != "data" && root.Name != "module" {
-					if name, ok := t[1].(hcl.TraverseAttr); ok {
-						targetAddr := root.Name + "." + name.Name
-						if targetAddr == fromAddr {
-							return cty.NilVal, false // self-reference
-						}
-						// Resolve the target resource
-						targetAttrs := r.ResolveResource(targetAddr)
-						if targetAttrs == nil {
-							return cty.NilVal, false
-						}
-						// Navigate remaining path (e.g. .instance_type)
-						return navigateAttrs(targetAttrs, t[2:])
+			if root, ok := t[0].(hcl.TraverseRoot); ok && !isNonResourceRoot(root.Name) {
+				if name, ok := t[1].(hcl.TraverseAttr); ok {
+					targetAddr := root.Name + "." + name.Name
+					if targetAddr == fromAddr {
+						return cty.NilVal, false // self-reference
 					}
+					targetAttrs := r.ResolveResource(targetAddr)
+					if targetAttrs == nil {
+						return cty.NilVal, false
+					}
+					return navigateAttrs(targetAttrs, t[2:])
 				}
 			}
 		}
 	}
-	// Non-resource reference: delegate to base resolver (var/local/functions)
-	return r.res.ResolveExpr(expr)
+	// Non-traversal expression: build a scope with var/local values plus
+	// on-demand resolved resource objects, then let HCL evaluate it.
+	vars, locals := r.res.ValueMaps()
+	ctx := funcs.Scope(vars, locals)
+	need := map[string]map[string]cty.Value{}
+	for _, addr := range addrsInExpr(expr) {
+		if addr == fromAddr {
+			continue // self-reference inside a nested expression
+		}
+		attrs := r.ResolveResource(addr)
+		if attrs == nil {
+			continue // unresolvable dep: leave its root out of scope
+		}
+		typ, name, _ := strings.Cut(addr, ".")
+		if need[typ] == nil {
+			need[typ] = map[string]cty.Value{}
+		}
+		need[typ][name] = cty.ObjectVal(attrs)
+	}
+	for typ, m := range need {
+		ctx.Variables[typ] = cty.ObjectVal(m)
+	}
+	if v, diags := expr.Value(ctx); !diags.HasErrors() {
+		return v, true
+	}
+	return cty.NilVal, false
 }
 
+// navigateAttrs walks the remaining traversal steps over a resolved attrs map.
+// A numeric [0] on the object itself is count=1 semantics and resolves to the
+// whole object.
 func navigateAttrs(attrs map[string]cty.Value, steps []hcl.Traverser) (cty.Value, bool) {
 	var val cty.Value
-	var ok bool
+	started := false
 	for i, step := range steps {
 		switch s := step.(type) {
 		case hcl.TraverseAttr:
-			key := s.Name
 			if i == 0 {
-				val, ok = attrs[key]
-				if !ok {
+				v, ok := attrs[s.Name]
+				if !ok || !v.IsKnown() {
 					return cty.NilVal, false
 				}
+				val = v
+				started = true
 			} else {
-				if !val.Type().IsObjectType() || !val.Type().HasAttribute(key) {
+				if !val.Type().IsObjectType() || !val.Type().HasAttribute(s.Name) {
 					return cty.NilVal, false
 				}
-				val = val.GetAttr(key)
+				val = val.GetAttr(s.Name)
 			}
 		case hcl.TraverseIndex:
 			idx := s.Key
+			if i == 0 {
+				// x[0].attr over a single resource object
+				if idx.Type() != cty.Number {
+					return cty.NilVal, false
+				}
+				if n, _ := idx.AsBigFloat().Int64(); n != 0 {
+					return cty.NilVal, false
+				}
+				val = cty.ObjectVal(attrs)
+				started = true
+				continue
+			}
 			switch {
 			case idx.Type() == cty.String && val.Type().IsObjectType():
 				if !val.Type().HasAttribute(idx.AsString()) {
 					return cty.NilVal, false
 				}
 				val = val.GetAttr(idx.AsString())
-			case idx.Type() == cty.Number:
+			case idx.Type() == cty.Number && (val.Type().IsListType() || val.Type().IsTupleType() || val.Type().IsSetType()):
 				i64, _ := idx.AsBigFloat().Int64()
-				var elems []cty.Value
-				if val.Type().IsListType() || val.Type().IsTupleType() || val.Type().IsSetType() {
-					elems = val.AsValueSlice()
-				}
+				elems := val.AsValueSlice()
 				if int(i64) < 0 || int(i64) >= len(elems) {
 					return cty.NilVal, false
 				}
 				val = elems[i64]
+			case idx.Type() == cty.Number && val.Type().IsObjectType():
+				if n, _ := idx.AsBigFloat().Int64(); n != 0 {
+					return cty.NilVal, false
+				}
 			default:
 				return cty.NilVal, false
 			}
 		default:
 			return cty.NilVal, false
 		}
-		if !val.IsKnown() {
+		if started && !val.IsKnown() {
 			return cty.NilVal, false
 		}
+	}
+	if !started {
+		return cty.NilVal, false
 	}
 	return val, true
 }
 
-// AllResolved returns all resolved resource attributes.
-// Call after ResolveResource for each resource.
+// AllResolved eagerly resolves every resource and returns the memo table.
 func (r *RefResolver) AllResolved() map[string]map[string]cty.Value {
 	for addr := range r.resources {
 		r.ResolveResource(addr)
