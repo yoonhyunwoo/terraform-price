@@ -216,8 +216,65 @@ func (r *Resolver) resolveResourceTraversal(root string, name string, rest []hcl
 	if !ok {
 		return cty.NilVal, false
 	}
-	obj := cty.ObjectVal(attrs)
-	return navigate(rest, obj)
+	// Parser stores nested-block attrs as flat dotted keys
+	// (root_block_device.volume_type). Explode into a nested object so
+	// .root_block_device[0].volume_type navigates naturally.
+	obj := cty.ObjectVal(explodeAttrs(attrs))
+	// Drop numeric index steps: resource[0] on a count-based resource (and
+	// single-occurrence nested blocks) carry the same config attrs at any
+	// index — count semantics, not value lookup.
+	filtered := rest[:0]
+	for _, s := range rest {
+		if idx, ok := s.(hcl.TraverseIndex); ok && idx.Key.Type() == cty.Number {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return navigate(filtered, obj)
+}
+
+// explodeAttrs converts {"a.b": v} into {"a": {"b": v}} recursively.
+func explodeAttrs(flat map[string]cty.Value) map[string]cty.Value {
+	out := map[string]cty.Value{}
+	for k, v := range flat {
+		parts := strings.SplitN(k, ".", 2)
+		if len(parts) == 1 {
+			out[k] = v
+			continue
+		}
+		if sub, ok := out[parts[0]]; ok && sub.Type().IsObjectType() {
+			// merge into existing nested object
+			merged := sub.AsValueMap()
+			nested := explodeNested(parts[1], v)
+			for nk, nv := range nested {
+				if existing, exists := merged[nk]; exists && existing.Type().IsObjectType() && nv.Type().IsObjectType() {
+					for k2, v2 := range nv.AsValueMap() {
+						merged[nk] = setAttr(merged[nk], k2, v2)
+					}
+				} else {
+					merged[nk] = nv
+				}
+			}
+			out[parts[0]] = cty.ObjectVal(merged)
+		} else {
+			out[parts[0]] = cty.ObjectVal(explodeNested(parts[1], v))
+		}
+	}
+	return out
+}
+
+func explodeNested(rest string, v cty.Value) map[string]cty.Value {
+	parts := strings.SplitN(rest, ".", 2)
+	if len(parts) == 1 {
+		return map[string]cty.Value{parts[0]: v}
+	}
+	return map[string]cty.Value{parts[0]: cty.ObjectVal(explodeNested(parts[1], v))}
+}
+
+func setAttr(obj cty.Value, key string, v cty.Value) cty.Value {
+	m := obj.AsValueMap()
+	m[key] = v
+	return cty.ObjectVal(m)
 }
 func rootName(tr hcl.Traverser) (string, bool) {
 	if root, ok := tr.(hcl.TraverseRoot); ok {
