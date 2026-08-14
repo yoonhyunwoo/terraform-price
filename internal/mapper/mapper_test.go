@@ -355,3 +355,26 @@ resource "aws_eks_node_group" "ng" {
 		t.Fatalf("multi-type approximation must be surfaced, got label %q", spec.Label)
 	}
 }
+
+// Regression: null or scalar instance_types used to panic at LengthInt.
+func TestEKSInstanceTypesNullNoPanic(t *testing.T) {
+	for name, body := range map[string]string{
+		"null":  `instance_types = null`,
+		"scalar": `instance_types = "t3.medium"`,
+	} {
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Errorf("%s: panic: %v", name, p)
+				}
+			}()
+			dir := t.TempDir()
+			writeFile(t, dir, "eks.tf", "resource \"aws_eks_node_group\" \"ng\" {\n  "+body+"\n  scaling_config { desired_size = 2 }\n}")
+			rs, _ := parser.ParseDir(dir)
+			kind, spec, note := MapResource(rs[0], resolver.NewResolver(dir), idxOf(rs), "ap-northeast-2")
+			if kind != KindFixed || spec != nil || note == "" {
+				t.Errorf("%s: want unresolved row, got kind=%v spec=%v note=%q", name, kind, spec, note)
+			}
+		}()
+	}
+}

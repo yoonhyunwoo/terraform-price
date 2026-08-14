@@ -697,8 +697,13 @@ func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]
 	}
 	multiType := ""
 	if e, ok := r.Exprs["instance_types"]; ok {
-		if v, ok := res.ResolveExpr(e); ok && v.IsKnown() && v.LengthInt() > 1 {
-			multiType = fmt.Sprintf(" (first of %d types)", v.LengthInt())
+		if v, ok := res.ResolveExpr(e); ok && v.IsKnown() && !v.IsNull() {
+			t := v.Type()
+			if t.IsListType() || t.IsSetType() || t.IsTupleType() {
+				if n := v.LengthInt(); n > 1 {
+					multiType = fmt.Sprintf(" (first of %d types)", n)
+				}
+			}
 		}
 	}
 	if it == "" {
