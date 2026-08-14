@@ -71,8 +71,8 @@ resource "aws_instance" "x" {
 }
 
 // Two modules whose inputs cross-reference each other's outputs form a
-// cycle; the running guard must degrade both to unresolved without
-// hanging, and the child resources still price via their defaults.
+// cycle; the running guard must keep this terminating while both sides
+// price on their variable defaults (the cross-references stay unset).
 func TestModuleOutputCycleDegrades(t *testing.T) {
 	root := writeModuleFixture(t, map[string]string{
 		"main.tf": `

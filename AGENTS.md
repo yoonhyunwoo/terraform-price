@@ -71,4 +71,10 @@ input values are evaluated in the parent scope and injected as the child's vars
 `variable` defaults backstop unset inputs. `count = 0` on the block gates the whole
 instance. Anything unfetchable (registry down, git:: sources, private modules)
 degrades to the generic info row — never an error. Module outputs referenced in the
-parent (`module.x.out`) are still unresolved; that is the known boundary.
+parent (`module.x.out`) resolve via lazy chained scopes: `RegisterModule` installs a
+memoized thunk per module and `moduleOutputs` forces it on first reference (a running
+guard makes genuine cycles degrade to defaults instead of hanging — nil results stay
+retryable so a mid-build miss is not memoized). `scope()` only exposes already-settled
+modules (forcing there could build a sibling mid-build and drop its inputs); the
+analyzer settles modules in registration order via `ForceModule` right after
+registration, and direct `module.x.out` traversals force transitively.
