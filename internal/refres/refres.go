@@ -11,9 +11,9 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/yoonhyunwoo/terraform-price/internal/funcs"
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/tffuncs"
 )
 
 type RefResolver struct {
@@ -154,7 +154,7 @@ func (r *RefResolver) resolveExpr(expr hcl.Expression, fromAddr string) (cty.Val
 		}
 	}
 	vars, locals := r.res.ValueMaps()
-	ctx := funcs.Scope(vars, locals)
+	ctx := tffuncs.EvalScope(vars, locals)
 	need := map[string]map[string]cty.Value{}
 	for _, addr := range addrsInExpr(expr) {
 		if addr == fromAddr {

@@ -11,8 +11,8 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/convert"
 
-	"github.com/yoonhyunwoo/terraform-price/internal/funcs"
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/tffuncs"
 )
 
 type Resolver struct {
@@ -235,7 +235,7 @@ func (r *Resolver) VarString(name string) (string, bool) {
 }
 
 func (r *Resolver) scope() *hcl.EvalContext {
-	ctx := funcs.Scope(r.vars, r.locals)
+	ctx := tffuncs.EvalScope(r.vars, r.locals)
 	if r.resScope != nil {
 		for t, v := range r.resScope {
 			ctx.Variables[t] = v

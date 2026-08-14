@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Package funcs provides the HCL expression function table used by the
-// resolver's evaluation context.
-package funcs
+// Package tffuncs implements the Terraform built-in function table
+// (Table) and the expression scope that carries it (EvalScope). hcl
+// parses and evaluates expressions but ships no Terraform functions —
+// this package is that missing layer, overlaying cty stdlib where the
+// semantics match and reimplementing where they diverge (length on
+// objects, tuple-to-set coercion).
+package tffuncs
 
 import (
 	"fmt"
@@ -183,7 +187,8 @@ var lookupFunc = function.New(&function.Spec{
 })
 
 // Core returns the function table for expression evaluation.
-func Core() map[string]function.Function {
+// Table returns the Terraform built-in function table.
+func Table() map[string]function.Function {
 	return map[string]function.Function{
 		"length":       lengthFunc,
 		"tolist":       toListFunc,
@@ -249,11 +254,12 @@ func Core() map[string]function.Function {
 
 var Add = stdlib.Add
 
-// Scope builds an EvalContext with var/local objects and the function table.
-func Scope(vars, locals map[string]cty.Value) *hcl.EvalContext {
+// EvalScope assembles the hcl.EvalContext used to evaluate
+// expressions: the Terraform function table plus var/local objects.
+func EvalScope(vars, locals map[string]cty.Value) *hcl.EvalContext {
 	ctx := &hcl.EvalContext{
 		Variables: map[string]cty.Value{},
-		Functions: Core(),
+		Functions: Table(),
 	}
 	if len(vars) > 0 {
 		ctx.Variables["var"] = cty.ObjectVal(vars)
