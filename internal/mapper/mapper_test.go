@@ -420,3 +420,23 @@ func TestEKSInstanceTypesNullNoPanic(t *testing.T) {
 		}()
 	}
 }
+
+// DocumentDB and Neptune price rows carry no deploymentOption attribute;
+// mapDBInstance must not filter on it (corpus: terragoat neptune matched
+// nothing until the filter was removed).
+func TestMapDBInstanceNoDeploymentOption(t *testing.T) {
+	for _, typ := range []string{"aws_docdb_cluster_instance", "aws_neptune_cluster_instance"} {
+		dir := t.TempDir()
+		writeFile(t, dir, "db.tf", "resource \""+typ+"\" \"i\" {\n  instance_class = \"db.t3.medium\"\n}")
+		rs, _ := parser.ParseDir(dir)
+		_, spec, note := MapResource(rs[0], resolver.NewResolver(dir), idxOf(rs), "ap-northeast-2")
+		if spec == nil {
+			t.Fatalf("%s: %v", typ, note)
+		}
+		for _, f := range spec.Filters {
+			if f.Field == "deploymentOption" {
+				t.Errorf("%s: deploymentOption filter present, matches nothing in the price list", typ)
+			}
+		}
+	}
+}

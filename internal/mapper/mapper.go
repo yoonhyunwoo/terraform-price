@@ -487,6 +487,9 @@ func auroraEngine(e string) string {
 	return "Aurora MySQL"
 }
 
+// mapDBInstance prices DocumentDB and Neptune instance classes. Their
+// Price List rows carry instanceType but no deploymentOption attribute
+// (unlike RDS) — adding that filter matches nothing.
 func mapDBInstance(r *parser.Resource, res *resolver.Resolver, serviceCode string) (*Spec, string, bool) {
 	ic, ok := resStr(r, res, "instance_class")
 	if !ok {
@@ -494,11 +497,8 @@ func mapDBInstance(r *parser.Resource, res *resolver.Resolver, serviceCode strin
 	}
 	return &Spec{
 		ServiceCode: serviceCode,
-		Filters: []provider.Filter{
-			tm("instanceType", ic),
-			tm("deploymentOption", "Single-AZ"),
-		},
-		UsageQty: 730, Count: 1, Label: ic,
+		Filters:     []provider.Filter{tm("instanceType", ic)},
+		UsageQty:    730, Count: 1, Label: ic,
 	}, "", true
 }
 
