@@ -290,3 +290,68 @@ func TestModuleBlockSurfacedAsUnsupported(t *testing.T) {
 		t.Fatalf("module: want Unsupported/nil-spec/module note, got kind=%v spec=%v note=%q", kind, spec, note)
 	}
 }
+
+func TestMapRDSEngineUnresolvedFails(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "rds.tf", `
+variable "engine" { default = "postgres" }
+resource "aws_db_instance" "db" {
+  instance_class = "db.t3.micro"
+  engine         = var.engine == "x" ? "mysql" : "postgres"
+}`)
+	rs, _ := parser.ParseDir(dir)
+	res := resolver.NewResolver(dir)
+	kind, spec, note := MapResource(rs[0], res, idxOf(rs), "ap-northeast-2")
+	if kind != KindFixed || spec != nil || note != "engine unresolved" {
+		t.Fatalf("want Fixed/nil/'engine unresolved', got kind=%v spec=%v note=%q", kind, spec, note)
+	}
+}
+
+func TestMapRDSEngineAbsentDefaults(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "rds.tf", `resource "aws_db_instance" "db" { instance_class = "db.t3.micro" }`)
+	rs, _ := parser.ParseDir(dir)
+	res := resolver.NewResolver(dir)
+	kind, spec, note := MapResource(rs[0], res, idxOf(rs), "ap-northeast-2")
+	if kind != KindFixed || spec == nil || note != "" {
+		t.Fatalf("absent engine should keep MySQL default, got kind=%v spec=%v note=%q", kind, spec, note)
+	}
+	if got := filterVal(spec, "databaseEngine"); got != "MySQL" {
+		t.Fatalf("default engine filter: want MySQL, got %q", got)
+	}
+}
+
+func TestMapAuroraClusterNoteConvention(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "aurora.tf", `resource "aws_rds_cluster" "c" { }`)
+	rs, _ := parser.ParseDir(dir)
+	res := resolver.NewResolver(dir)
+	kind, spec, note := MapResource(rs[0], res, idxOf(rs), "ap-northeast-2")
+	if kind != KindVariable || spec == nil {
+		t.Fatalf("want Variable/spec, got kind=%v spec=%v", kind, spec)
+	}
+	if note != "" {
+		t.Fatalf("ok=true must return empty note (display text belongs to Spec.Note), got %q", note)
+	}
+	if spec.Note == "" {
+		t.Fatal("display note should live in Spec.Note")
+	}
+}
+
+func TestMapEKSNodeGroupMultiTypeSuffix(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "eks.tf", `
+resource "aws_eks_node_group" "ng" {
+  instance_types = ["t3.medium", "t3.large", "t3.xlarge"]
+  scaling_config { desired_size = 2 }
+}`)
+	rs, _ := parser.ParseDir(dir)
+	res := resolver.NewResolver(dir)
+	kind, spec, _ := MapResource(rs[0], res, idxOf(rs), "ap-northeast-2")
+	if kind != KindFixed || spec == nil {
+		t.Fatalf("want Fixed spec, got kind=%v spec=%v", kind, spec)
+	}
+	if !strings.Contains(spec.Label, "first of 3 types") {
+		t.Fatalf("multi-type approximation must be surfaced, got label %q", spec.Label)
+	}
+}

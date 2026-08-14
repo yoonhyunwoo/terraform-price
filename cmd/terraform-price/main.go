@@ -121,6 +121,9 @@ func main() {
 
 func variableItem(ctx context.Context, pricer provider.Pricer, addr, typ, note string, spec *mapper.Spec) output.CostItem {
 	item := output.CostItem{Kind: output.Variable, Addr: addr, Type: typ, Note: note}
+	if spec != nil && spec.Note != "" {
+		item.Note = spec.Note
+	}
 	if spec == nil {
 		return item
 	}

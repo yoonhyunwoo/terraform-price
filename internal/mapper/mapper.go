@@ -93,6 +93,7 @@ type Spec struct {
 	UsageQty    float64
 	Count       int
 	Label       string
+	Note        string
 	PreferUnit  string
 	Rates       []Rate
 }
@@ -341,7 +342,10 @@ func mapRDS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 	if !ok {
 		return nil, "instance_class unresolved", false
 	}
-	engine, _ := resStr(r, res, "engine")
+	engine, hasEngine := resStr(r, res, "engine")
+	if !hasEngine && lookupExpr(r, []string{"engine"}) != nil {
+		return nil, "engine unresolved", false
+	}
 	deploy := "Single-AZ"
 	if resBool(r, res, "multi_az") {
 		deploy = "Multi-AZ"
@@ -363,8 +367,11 @@ func mapAuroraInstance(r *parser.Resource, res *resolver.Resolver, idx map[strin
 	if !ok {
 		return nil, "instance_class unresolved", false
 	}
-	engine, ok := resStr(r, res, "engine")
-	if !ok {
+	engine, hasEngine := resStr(r, res, "engine")
+	if !hasEngine {
+		if lookupExpr(r, []string{"engine"}) != nil {
+			return nil, "engine unresolved", false
+		}
 		if c := refResource(lookupExpr(r, []string{"cluster_identifier"}), idx); c != nil {
 			engine, _ = resStr(c, res, "engine")
 		}
@@ -414,8 +421,7 @@ func mapAuroraCluster(r *parser.Resource, res *resolver.Resolver, loc, region st
 			DisplayMult: 1_000_000, DisplayUnit: "1M I/O",
 		}}
 	}
-	return &Spec{Label: "Aurora storage & I/O", Rates: rates},
-		"Aurora storage & I/O — billed by usage (instances are priced via aws_rds_cluster_instance)", true
+	return &Spec{Label: "Aurora storage & I/O", Note: "Aurora storage & I/O — billed by usage (instances are priced via aws_rds_cluster_instance)", Rates: rates}, "", true
 }
 
 func mapSecret(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
@@ -446,11 +452,11 @@ func mapDBProxy(r *parser.Resource, res *resolver.Resolver, idx map[string]*pars
 			Label: fmt.Sprintf("RDS Proxy × %d vCPU", vcpu),
 		}, "", true
 	}
-	return &Spec{Label: "RDS Proxy", Rates: []Rate{{
+	return &Spec{Label: "RDS Proxy", Note: "RDS Proxy — target vCPU unresolved, monthly ≈ unit price × vCPU count × 730", Rates: []Rate{{
 		Label: "vCPU", ServiceCode: "AmazonRDS",
 		Filters:    filters,
 		PreferUnit: "Hrs", DisplayUnit: "vCPU-hour",
-	}}}, "RDS Proxy — target vCPU unresolved, monthly ≈ unit price × vCPU count × 730", true
+	}}}, "", true
 }
 
 func proxyTargetVCPU(proxy *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) int {
@@ -689,13 +695,19 @@ func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]
 			it = s
 		}
 	}
+	multiType := ""
+	if e, ok := r.Exprs["instance_types"]; ok {
+		if v, ok := res.ResolveExpr(e); ok && v.IsKnown() && v.LengthInt() > 1 {
+			multiType = fmt.Sprintf(" (first of %d types)", v.LengthInt())
+		}
+	}
 	if it == "" {
 		return nil, "EKS node group instance_type unresolved (launch_template/instance_types)", false
 	}
 	if count == 0 {
 		return nil, "EKS node group desired_size unresolved", false
 	}
-	return ec2InstanceSpec(it, loc, fmt.Sprintf("%s × %d (EKS node)", it, count), count), "", true
+	return ec2InstanceSpec(it, loc, fmt.Sprintf("%s × %d (EKS node)%s", it, count, multiType), count), "", true
 }
 
 func mapNATGateway(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
