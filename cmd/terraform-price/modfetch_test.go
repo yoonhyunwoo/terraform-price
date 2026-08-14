@@ -41,3 +41,30 @@ func TestVersionLess(t *testing.T) {
 		t.Error("equal versions must not compare less")
 	}
 }
+
+func TestSatisfiesAll(t *testing.T) {
+	cases := []struct {
+		v, constraint string
+		want          bool
+	}{
+		{"5.50.2", "~> 5.50.0", true},
+		{"5.51.0", "~> 5.50.0", false}, // ~> x.y.z caps the minor
+		{"6.1.0", "~> 5.50.0", false},
+		{"5.60.0", ">= 5.60.0", true},
+		{"5.50.0", ">= 5.60.0", false},
+		{"5.70.1", ">= 5.60.0, < 6.0.0", true},
+		{"6.0.0", ">= 5.60.0, < 6.0.0", false},
+		{"5.50.1", "5.50.1", true}, // bare = exact
+		{"5.50.2", "5.50.1", false},
+		{"1.9.0", "= 1.9.0", true},
+		{"1.9.1", "!= 1.9.1", false},
+		{"1.9.0", "!= 1.9.1", true},
+		{"6.20.1", "<= 6.20.1", true},
+		{"6.20.2", "<= 6.20.1", false},
+	}
+	for _, c := range cases {
+		if got := satisfiesAll(c.v, c.constraint); got != c.want {
+			t.Errorf("satisfiesAll(%q, %q) = %v, want %v", c.v, c.constraint, got, c.want)
+		}
+	}
+}

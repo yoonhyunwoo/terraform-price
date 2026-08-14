@@ -46,8 +46,9 @@ func resolveVersion(rs *registrySource, pin string) (string, error) {
 }
 
 // pickVersions returns candidate versions, newest first. An exact pin
-// yields that version alone; "~>" yields the matching versions newest
-// first; no pin yields every published stable version newest first.
+// yields that version alone; a constraint ("~> 5.5", ">= 1.0, < 2.0.0")
+// yields the satisfying versions newest first; no pin yields every
+// published stable version newest first.
 func pickVersions(rs *registrySource, pin string) ([]string, error) {
 	if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+$`, pin); ok {
 		return []string{pin}, nil
@@ -82,11 +83,10 @@ func pickVersions(rs *registrySource, pin string) ([]string, error) {
 		return nil, fmt.Errorf("no published versions")
 	}
 	sort.Slice(vers, func(i, j int) bool { return versionLess(vers[j], vers[i]) }) // descending
-	if c, ok := strings.CutPrefix(pin, "~> "); ok {
-		want := strings.Split(c, ".")
+	if strings.TrimSpace(pin) != "" {
 		matched := make([]string, 0, len(vers))
 		for _, v := range vers {
-			if satisfiesPessimistic(want, strings.Split(v, ".")) {
+			if satisfiesAll(v, pin) {
 				matched = append(matched, v)
 			}
 		}
@@ -95,6 +95,51 @@ func pickVersions(rs *registrySource, pin string) ([]string, error) {
 		}
 	}
 	return vers, nil
+}
+
+// satisfiesAll checks a version against a comma-separated Terraform
+// constraint ("~> 5.5.1", ">= 1.0, < 2.0.0, != 1.2.3"). A bare version
+// means exact match, as in Terraform.
+func satisfiesAll(v, pin string) bool {
+	for _, tok := range strings.Split(pin, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		op := "="
+		target := tok
+		for _, cand := range []string{"~>", ">=", "<=", "!=", ">", "<", "="} {
+			if strings.HasPrefix(tok, cand) {
+				op = cand
+				target = strings.TrimSpace(tok[len(cand):])
+				break
+			}
+		}
+		if !satisfiesOp(v, op, target) {
+			return false
+		}
+	}
+	return true
+}
+
+func satisfiesOp(v, op, target string) bool {
+	switch op {
+	case "~>":
+		return satisfiesPessimistic(strings.Split(target, "."), strings.Split(v, "."))
+	case "=":
+		return !versionLess(v, target) && !versionLess(target, v)
+	case "!=":
+		return versionLess(v, target) || versionLess(target, v)
+	case ">=":
+		return !versionLess(v, target)
+	case "<=":
+		return !versionLess(target, v)
+	case ">":
+		return versionLess(target, v)
+	case "<":
+		return versionLess(v, target)
+	}
+	return false
 }
 
 // satisfiesPessimistic implements terraform's ~> constraint:

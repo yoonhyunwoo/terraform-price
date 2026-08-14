@@ -76,6 +76,8 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 	r := &Resolver{vars: map[string]cty.Value{}, locals: map[string]cty.Value{}}
 	parser := hclparse.NewParser()
 
+	decls := collectVarDecls(dir)
+
 	// tfvars: terraform.tfvars first, then *.auto.tfvars (later wins).
 	for _, pattern := range []string{"terraform.tfvars", "*.auto.tfvars"} {
 		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
@@ -87,7 +89,7 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 			if attrs, d := fv.Body.JustAttributes(); !d.HasErrors() {
 				for name, attr := range attrs {
 					if val, d := attr.Expr.Value(&hcl.EvalContext{}); !d.HasErrors() {
-						r.vars[name] = normalizeVarVal(val)
+						r.vars[name] = r.enterVar(name, val, decls)
 					}
 				}
 			}
@@ -95,10 +97,17 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 	}
 
 	for k, v := range inputs {
-		r.vars[k] = normalizeVarVal(v)
+		r.vars[k] = r.enterVar(k, v, decls)
 	}
 
-	r.loadVarDefaults(dir)
+	for name, d := range decls {
+		if _, set := r.vars[name]; set || d.defaultExpr == nil {
+			continue
+		}
+		if val, dg := d.defaultExpr.Value(&hcl.EvalContext{}); !dg.HasErrors() {
+			r.vars[name] = r.enterVar(name, val, decls)
+		}
+	}
 	r.pendingLocs = map[string]hcl.Expression{}
 	entries, err := os.ReadDir(dir)
 	if err == nil {
@@ -165,10 +174,16 @@ func normalizeVarVal(v cty.Value) cty.Value {
 	return v
 }
 
-func (r *Resolver) loadVarDefaults(dir string) {
+type varDecl struct {
+	typeExpr    hcl.Expression
+	defaultExpr hcl.Expression
+}
+
+func collectVarDecls(dir string) map[string]varDecl {
+	decls := map[string]varDecl{}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return
+		return decls
 	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".tf") {
@@ -185,27 +200,34 @@ func (r *Resolver) loadVarDefaults(dir string) {
 			continue
 		}
 		for _, blk := range content.Blocks {
-			name := blk.Labels[0]
-			if _, set := r.vars[name]; set {
-				continue
-			}
 			// PartialContent (not JustAttributes): variable blocks may
 			// contain nested validation blocks which JustAttributes rejects.
 			vc, _, d := blk.Body.PartialContent(&hcl.BodySchema{
-				Attributes: []hcl.AttributeSchema{{Name: "default"}},
+				Attributes: []hcl.AttributeSchema{{Name: "type"}, {Name: "default"}},
 			})
 			if d.HasErrors() {
 				continue
 			}
-			def, ok := vc.Attributes["default"]
-			if !ok {
-				continue
+			dl := varDecl{}
+			if a, ok := vc.Attributes["type"]; ok {
+				dl.typeExpr = a.Expr
 			}
-			if val, d := def.Expr.Value(&hcl.EvalContext{}); !d.HasErrors() {
-				r.vars[name] = normalizeVarVal(val)
+			if a, ok := vc.Attributes["default"]; ok {
+				dl.defaultExpr = a.Expr
 			}
+			decls[blk.Labels[0]] = dl
 		}
 	}
+	return decls
+}
+
+// enterVar runs a value through the coercion gate; undeclared variables
+// keep the legacy tuple→list normalization.
+func (r *Resolver) enterVar(name string, v cty.Value, decls map[string]varDecl) cty.Value {
+	if d, ok := decls[name]; ok {
+		return coerceToDeclaredType(v, d.typeExpr)
+	}
+	return normalizeVarVal(v)
 }
 
 func (r *Resolver) VarString(name string) (string, bool) {
