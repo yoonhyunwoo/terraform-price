@@ -20,6 +20,51 @@ type Resolver struct {
 	resources   map[string]map[string]cty.Value
 	pendingLocs map[string]hcl.Expression
 	resScope    map[string]cty.Value // resource TYPE → ObjectVal{name → attrs}
+	modules     map[string]*moduleEntry
+}
+
+// moduleEntry is a lazily evaluated module-instance output set: the
+// registered thunk computes it once on first demand; a re-entrant call
+// while running (a module-output reference cycle) reports unavailable so
+// the referencing expression degrades to unresolved instead of looping.
+type moduleEntry struct {
+	fn      func() map[string]cty.Value
+	vals    map[string]cty.Value
+	done    bool
+	running bool
+}
+
+// RegisterModule registers a module instance's output thunk so parent
+// expressions can resolve module.<name>.<output> references. Registering
+// is not evaluating — the thunk runs on first reference and is memoized.
+func (r *Resolver) RegisterModule(name string, outputs func() map[string]cty.Value) {
+	if r.modules == nil {
+		r.modules = map[string]*moduleEntry{}
+	}
+	r.modules[name] = &moduleEntry{fn: outputs}
+}
+
+// moduleOutputs returns a registered module instance's output values,
+// forcing the thunk once. nil outputs (unfetchable module) report
+// unavailable.
+func (r *Resolver) moduleOutputs(name string) (map[string]cty.Value, bool) {
+	e, ok := r.modules[name]
+	if !ok {
+		return nil, false
+	}
+	if !e.done {
+		if e.running {
+			return nil, false
+		}
+		e.running = true
+		e.vals = e.fn()
+		e.running = false
+		e.done = true
+	}
+	if e.vals == nil {
+		return nil, false
+	}
+	return e.vals, true
 }
 
 // NewResolver builds a resolver over a Terraform directory.
@@ -171,6 +216,19 @@ func (r *Resolver) scope() *hcl.EvalContext {
 			ctx.Variables[t] = v
 		}
 	}
+	// Expose registered module outputs as a `module` object so references
+	// nested in templates/functions ("${module.m.out}-x") evaluate too.
+	if len(r.modules) > 0 {
+		mods := make(map[string]cty.Value, len(r.modules))
+		for name := range r.modules {
+			if outs, ok := r.moduleOutputs(name); ok {
+				mods[name] = cty.ObjectVal(outs)
+			}
+		}
+		if len(mods) > 0 {
+			ctx.Variables["module"] = cty.ObjectVal(mods)
+		}
+	}
 	return ctx
 }
 
@@ -199,11 +257,22 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 		return navigate(t[1:], cty.ObjectVal(r.vars))
 	case "local":
 		return navigate(t[1:], cty.ObjectVal(r.locals))
+	case "module":
+		// Chained scope: delegate into a registered module instance's
+		// lazily computed outputs (module.m.output).
+		if len(t) >= 2 {
+			if name, ok := t[1].(hcl.TraverseAttr); ok {
+				if outs, ok := r.moduleOutputs(name.Name); ok {
+					return navigate(t[2:], cty.ObjectVal(outs))
+				}
+			}
+		}
+		return cty.NilVal, false
 	}
 	if parser.IsScopeRoot(root) {
 		// Known-unknowns, unresolved by design and reported as such —
 		// never guessed: provider-computed attrs (id/arn/latest_version),
-		// data.*, module.*, each.key, self.
+		// data.*, each.key, self.
 		return cty.NilVal, false
 	}
 	// Resource reference: aws_instance.a.instance_type

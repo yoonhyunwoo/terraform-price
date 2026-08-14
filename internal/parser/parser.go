@@ -92,3 +92,37 @@ func collectExprs(body *hclsyntax.Body, prefix string, out map[string]hcl.Expres
 		collectExprs(blk.Body, bkey, out)
 	}
 }
+
+// ParseOutputs reads each output block's value expression from a
+// directory's .tf files: output name -> value expr. Non-value attributes
+// (description, sensitive) and nested blocks are ignored.
+func ParseOutputs(dir string) map[string]hcl.Expression {
+	out := map[string]hcl.Expression{}
+	parser := hclparse.NewParser()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".tf" {
+			continue
+		}
+		f, diags := parser.ParseHCLFile(filepath.Join(dir, e.Name()))
+		if diags.HasErrors() || f == nil {
+			continue
+		}
+		sbody, ok := f.Body.(*hclsyntax.Body)
+		if !ok {
+			continue
+		}
+		for _, blk := range sbody.Blocks {
+			if blk.Type != "output" || len(blk.Labels) != 1 {
+				continue
+			}
+			if attr, ok := blk.Body.Attributes["value"]; ok {
+				out[blk.Labels[0]] = attr.Expr
+			}
+		}
+	}
+	return out
+}
