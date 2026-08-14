@@ -1,12 +1,12 @@
 package main
 
 import (
-	"time"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/mapper"
 	"github.com/yoonhyunwoo/terraform-price/internal/output"

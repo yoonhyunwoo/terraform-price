@@ -24,26 +24,26 @@ const (
 )
 
 var usageTypes = map[string]string{
-	"aws_s3_bucket":               "S3 storage, requests, and data transfer (usage-based)",
-	"aws_lambda_function":         "Lambda requests and GB-seconds (usage-based)",
-	"aws_sqs_queue":               "SQS requests (usage-based)",
-	"aws_sns_topic":               "SNS requests (usage-based)",
-	"aws_dynamodb_table":          "DynamoDB RCU/WCU or on-demand (usage-based)",
-	"aws_cloudwatch_log_group":    "CloudWatch Logs ingestion and storage (usage-based)",
-	"aws_cloudfront_distribution": "CloudFront data transfer and requests (usage-based)",
-	"aws_apigateway_rest_api":     "API Gateway requests (usage-based)",
-	"aws_elasticache_serverless_cache": "ElastiCache serverless: ECPU + data storage GB-month (usage-based)",
-	"aws_lb_listener":                 "ALB/NLB LCU or data processing (usage-based)",
+	"aws_s3_bucket":                             "S3 storage, requests, and data transfer (usage-based)",
+	"aws_lambda_function":                       "Lambda requests and GB-seconds (usage-based)",
+	"aws_sqs_queue":                             "SQS requests (usage-based)",
+	"aws_sns_topic":                             "SNS requests (usage-based)",
+	"aws_dynamodb_table":                        "DynamoDB RCU/WCU or on-demand (usage-based)",
+	"aws_cloudwatch_log_group":                  "CloudWatch Logs ingestion and storage (usage-based)",
+	"aws_cloudfront_distribution":               "CloudFront data transfer and requests (usage-based)",
+	"aws_apigateway_rest_api":                   "API Gateway requests (usage-based)",
+	"aws_elasticache_serverless_cache":          "ElastiCache serverless: ECPU + data storage GB-month (usage-based)",
+	"aws_lb_listener":                           "ALB/NLB LCU or data processing (usage-based)",
 	"aws_lambda_provisioned_concurrency_config": "Provisioned concurrency GB-hours (memory size × concurrency, usage-based)",
-	"aws_s3_directory_bucket":          "S3 Express One Zone storage and requests (usage-based)",
-	"aws_apigatewayv2_api":        "API Gateway requests (usage-based)",
-	"aws_codebuild_project":       "CodeBuild build minutes (usage-based)",
-	"aws_kinesis_stream":          "Kinesis shard-hours plus payload (usage-based)",
-	"aws_efs_file_system":         "EFS GB-month, dynamic size (usage-based)",
+	"aws_s3_directory_bucket":                   "S3 Express One Zone storage and requests (usage-based)",
+	"aws_apigatewayv2_api":                      "API Gateway requests (usage-based)",
+	"aws_codebuild_project":                     "CodeBuild build minutes (usage-based)",
+	"aws_kinesis_stream":                        "Kinesis shard-hours plus payload (usage-based)",
+	"aws_efs_file_system":                       "EFS GB-month, dynamic size (usage-based)",
 }
 
 var infoTypes = map[string]string{
-	"aws_ec2_transit_gateway": "transit gateway — billed per attachment (see aws_ec2_transit_gateway_vpc_attachment)",
+	"aws_ec2_transit_gateway":     "transit gateway — billed per attachment (see aws_ec2_transit_gateway_vpc_attachment)",
 	"aws_launch_template":         "launch template — priced via the ASG/EKS node group referencing it",
 	"aws_launch_configuration":    "launch config — priced via the ASG referencing it",
 	"aws_docdb_cluster":           "DocumentDB cluster — instance cost is priced via aws_docdb_cluster_instance",
@@ -58,39 +58,39 @@ var infoTypes = map[string]string{
 }
 
 var freeTypes = map[string]struct{}{
-	"aws_ecs_capacity_provider":            {},
-	"aws_ecs_cluster_capacity_providers":   {},
-	"aws_iam_role":                      {},
-	"aws_iam_policy":                    {},
-	"aws_iam_policy_attachment":         {},
-	"aws_iam_user":                      {},
-	"aws_iam_group":                     {},
-	"aws_iam_instance_profile":          {},
-	"aws_iam_access_key":                {},
-	"aws_security_group":                {},
-	"aws_security_group_rule":           {},
-	"aws_vpc":                           {},
-	"aws_subnet":                        {},
-	"aws_route_table":                   {},
-	"aws_route":                         {},
-	"aws_route_table_association":       {},
-	"aws_internet_gateway":              {},
-	"aws_network_acl":                   {},
-	"aws_network_acl_rule":              {},
-	"aws_network_interface":             {},
-	"aws_db_subnet_group":               {},
-	"aws_iam_role_policy_attachment":    {},
-	"aws_iam_role_policy":               {},
-	"aws_rds_cluster_parameter_group":   {},
-	"aws_db_parameter_group":            {},
-	"aws_db_option_group":               {},
-	"aws_db_proxy_default_target_group": {},
-	"aws_db_proxy_target":               {},
-	"aws_secretsmanager_secret_version": {},
-	"random_password":                   {},
-	"random_string":                     {},
-	"random_id":                         {},
-	"null_resource":                     {},
+	"aws_ecs_capacity_provider":          {},
+	"aws_ecs_cluster_capacity_providers": {},
+	"aws_iam_role":                       {},
+	"aws_iam_policy":                     {},
+	"aws_iam_policy_attachment":          {},
+	"aws_iam_user":                       {},
+	"aws_iam_group":                      {},
+	"aws_iam_instance_profile":           {},
+	"aws_iam_access_key":                 {},
+	"aws_security_group":                 {},
+	"aws_security_group_rule":            {},
+	"aws_vpc":                            {},
+	"aws_subnet":                         {},
+	"aws_route_table":                    {},
+	"aws_route":                          {},
+	"aws_route_table_association":        {},
+	"aws_internet_gateway":               {},
+	"aws_network_acl":                    {},
+	"aws_network_acl_rule":               {},
+	"aws_network_interface":              {},
+	"aws_db_subnet_group":                {},
+	"aws_iam_role_policy_attachment":     {},
+	"aws_iam_role_policy":                {},
+	"aws_rds_cluster_parameter_group":    {},
+	"aws_db_parameter_group":             {},
+	"aws_db_option_group":                {},
+	"aws_db_proxy_default_target_group":  {},
+	"aws_db_proxy_target":                {},
+	"aws_secretsmanager_secret_version":  {},
+	"random_password":                    {},
+	"random_string":                      {},
+	"random_id":                          {},
+	"null_resource":                      {},
 }
 
 type Spec struct {
@@ -790,8 +790,10 @@ func elasticacheEngine(e string) string {
 
 // resolveResourceRef finds the resource an expression ultimately references,
 // following unresolved locals transitively. This handles the pattern
-//   launch_template { id = local.lt_block.id }
-//   locals { lt_block = { id = one(aws_launch_template.default[*].id) } }
+//
+//	launch_template { id = local.lt_block.id }
+//	locals { lt_block = { id = one(aws_launch_template.default[*].id) } }
+//
 // where the id VALUE is computed but the TARGET resource is discoverable.
 func resolveResourceRef(expr hcl.Expression, res *resolver.Resolver, idx map[string]*parser.Resource) *parser.Resource {
 	return chaseResourceRef(expr, res, idx, map[string]bool{})

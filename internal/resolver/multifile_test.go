@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	
 )
 
 // Locals spread across multiple files (darktrace pattern)

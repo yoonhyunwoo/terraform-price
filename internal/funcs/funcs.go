@@ -132,7 +132,6 @@ var sumFunc = function.New(&function.Spec{
 	},
 })
 
-
 var lengthFunc = function.New(&function.Spec{
 	Params: []function.Parameter{
 		{
@@ -150,7 +149,6 @@ var lengthFunc = function.New(&function.Spec{
 		return stdlib.LengthFunc.Call([]cty.Value{val})
 	},
 })
-
 
 var lookupFunc = function.New(&function.Spec{
 	Params: []function.Parameter{
