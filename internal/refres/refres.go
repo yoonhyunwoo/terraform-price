@@ -73,39 +73,48 @@ func (r *RefResolver) Verify() error {
 }
 
 // deps returns addresses referenced by the resource's expressions.
+// Uses expr.Variables() so refs nested in try()/coalesce()/conditionals/
+// templates count as edges — a cycle hidden behind a try() fallback would
+// otherwise price both sides with the fallback value (silent wrong answer).
 func (r *RefResolver) deps(addr string) []string {
 	res, ok := r.resources[addr]
 	if !ok {
 		return nil
 	}
+	seen := map[string]bool{}
 	var out []string
 	for _, expr := range res.Exprs {
-		out = append(out, exprDeps(expr)...)
+		for _, addr := range addrsInExpr(expr) {
+			if !seen[addr] {
+				seen[addr] = true
+				out = append(out, addr)
+			}
+		}
 	}
 	return out
 }
 
-func exprDeps(expr hcl.Expression) []string {
-	ste, ok := expr.(*hclsyntax.ScopeTraversalExpr)
-	if !ok {
-		return nil
+func addrsInExpr(expr hcl.Expression) []string {
+	var out []string
+	for _, t := range expr.Variables() {
+		if len(t) < 2 {
+			continue
+		}
+		root, ok := t[0].(hcl.TraverseRoot)
+		if !ok {
+			continue
+		}
+		switch root.Name {
+		case "var", "local", "data", "module", "terraform", "path", "cwd", "each", "count", "self":
+			continue
+		}
+		name, ok := t[1].(hcl.TraverseAttr)
+		if !ok {
+			continue
+		}
+		out = append(out, root.Name+"."+name.Name)
 	}
-	t := hcl.Traversal(ste.Traversal)
-	if len(t) < 2 {
-		return nil
-	}
-	root, ok := t[0].(hcl.TraverseRoot)
-	if !ok {
-		return nil
-	}
-	if root.Name == "var" || root.Name == "local" || root.Name == "data" || root.Name == "module" {
-		return nil
-	}
-	name, ok := t[1].(hcl.TraverseAttr)
-	if !ok {
-		return nil
-	}
-	return []string{root.Name + "." + name.Name}
+	return out
 }
 
 // ResolveAttr resolves an attribute of a resource, following references.

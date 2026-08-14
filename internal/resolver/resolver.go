@@ -343,7 +343,7 @@ func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 // SetResources registers resolved resource attributes and builds the
 // resource TYPE-rooted evaluation scope (aws_launch_template = {this = {...}})
 // so expressions like one(aws_launch_template.default[*].id) evaluate natively.
-func (r *Resolver) SetResources(resources map[string]map[string]cty.Value) {
+func (r *Resolver) SetResources(resources map[string]map[string]cty.Value, countBased map[string]bool) {
 	r.resources = resources
 	byType := map[string]map[string]cty.Value{}
 	for addr, attrs := range resources {
@@ -356,7 +356,12 @@ func (r *Resolver) SetResources(resources map[string]map[string]cty.Value) {
 			nameObjs = map[string]cty.Value{}
 			byType[parts[0]] = nameObjs
 		}
-		nameObjs[parts[1]] = cty.ObjectVal(attrs)
+		obj := cty.ObjectVal(explodeAttrs(attrs))
+		if countBased[addr] {
+			// count/for_each resource: ref as a collection (a[*].attr, a[0])
+			obj = cty.TupleVal([]cty.Value{obj})
+		}
+		nameObjs[parts[1]] = obj
 	}
 	scope := make(map[string]cty.Value, len(byType))
 	for t, names := range byType {

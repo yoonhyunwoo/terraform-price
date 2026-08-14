@@ -186,8 +186,11 @@ func TestMapLBType(t *testing.T) {
 	if kind != KindFixed || spec == nil {
 		t.Fatalf("got kind=%v spec=%v note=%q", kind, spec, note)
 	}
-	if got := filterVal(spec, "loadBalancerType"); got != "Network" {
-		t.Errorf("loadBalancerType filter: want Network (capitalized), got %q", got)
+	if got := filterVal(spec, "usagetype"); got != "LoadBalancerUsage" {
+		t.Errorf("usagetype filter: want LoadBalancerUsage, got %q", got)
+	}
+	if got := filterVal(spec, "productFamily"); got != "Load Balancer-Network" {
+		t.Errorf("productFamily filter: want Load Balancer-Network, got %q", got)
 	}
 }
 

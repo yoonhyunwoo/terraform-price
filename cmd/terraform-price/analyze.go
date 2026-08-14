@@ -39,12 +39,21 @@ func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.
 	// and attrs referencing them both converge.
 	rr := refres.New(resources, res)
 	if err := rr.Verify(); err != nil {
-		return nil, fmt.Errorf("reference cycle: %w", err)
+		return nil, err
 	}
-	res.SetResources(rr.AllResolved())
+	countBased := make(map[string]bool, len(resources))
+	for _, r := range resources {
+		if _, ok := r.Exprs["count"]; ok {
+			countBased[r.Type+"."+r.Name] = true
+		}
+		if _, ok := r.Exprs["for_each"]; ok {
+			countBased[r.Type+"."+r.Name] = true
+		}
+	}
+	res.SetResources(rr.AllResolved(), countBased)
 	for res.RetryLocals() {
 		rr.Reset()
-		res.SetResources(rr.AllResolved())
+		res.SetResources(rr.AllResolved(), countBased)
 	}
 
 	var items []output.CostItem

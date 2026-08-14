@@ -43,6 +43,7 @@ var usageTypes = map[string]string{
 }
 
 var infoTypes = map[string]string{
+	"aws_ec2_transit_gateway": "transit gateway — billed per attachment (see aws_ec2_transit_gateway_vpc_attachment)",
 	"aws_launch_template":         "launch template — priced via the ASG/EKS node group referencing it",
 	"aws_launch_configuration":    "launch config — priced via the ASG referencing it",
 	"aws_docdb_cluster":           "DocumentDB cluster — instance cost is priced via aws_docdb_cluster_instance",
@@ -258,8 +259,6 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 		spec, note, ok = mapDBInstance(r, res, "AmazonNeptune")
 	case "aws_msk_cluster":
 		spec, note, ok = mapMSK(r, res)
-	case "aws_ec2_transit_gateway":
-		spec, note, ok = mapTGW("TransitGateway-Hours", "transit gateway attachment", r, res), "", true
 	case "aws_ec2_transit_gateway_vpc_attachment":
 		spec, note, ok = mapTGW("TransitGateway-Hours", "TGW VPC attachment", r, res), "", true
 	case "aws_elasticache_replication_group", "aws_elasticache_cluster":
@@ -728,13 +727,22 @@ func mapLB(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 		return nil, "load_balancer_type unresolved", false
 	}
 	lbt = strings.ToUpper(lbt[:1]) + lbt[1:]
-	return &Spec{
-		ServiceCode: "AmazonElasticLoadBalancing",
-		Filters: []provider.Filter{
-			tm("loadBalancerType", lbt),
-		},
-		UsageQty: 730, Count: 1, Label: lbt + " LB", PreferUnit: "Hrs",
-	}, "", true
+	// Pricing rows key on usagetype + productFamily, not loadBalancerType:
+	// ALB and NLB hourly rows share usagetype LoadBalancerUsage.
+	switch lbt {
+	case "Application", "Network":
+		return &Spec{
+			ServiceCode: "AmazonEC2",
+			Filters: []provider.Filter{
+				tm("usagetype", "LoadBalancerUsage"),
+				tm("productFamily", "Load Balancer-"+lbt),
+			},
+			UsageQty: 730, Count: 1, Label: lbt + " LB", PreferUnit: "Hrs",
+		}, "", true
+	default:
+		// Gateway LB: billed per GWLB endpoint in the spoke VPCs, not hourly.
+		return nil, lbt + " LB — billed per GWLB endpoint (usage-based)", false
+	}
 }
 
 func mapFSxLustre(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
