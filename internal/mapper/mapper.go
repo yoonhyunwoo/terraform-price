@@ -259,11 +259,11 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	case "aws_msk_cluster":
 		spec, note, ok = mapMSK(r, res)
 	case "aws_eks_cluster":
-		spec, note, ok = mapEKSCluster(r, res), "", true
+		spec, note, ok = flatHourly("AmazonEKS", "AmazonEKS-Hours:perCluster", "EKS control plane"), "", true
 	case "aws_vpn_connection":
-		spec, note, ok = mapVPNConnection(r, res), "", true
+		spec, note, ok = flatHourly("AmazonVPC", "VPN-Usage-Hours:ipsec.1", "VPN connection"), "", true
 	case "aws_ec2_transit_gateway_vpc_attachment":
-		spec, note, ok = mapTGW("TransitGateway-Hours", "TGW VPC attachment", r, res), "", true
+		spec, note, ok = flatHourly("AmazonVPC", "TransitGateway-Hours", "TGW VPC attachment"), "", true
 	case "aws_elasticache_replication_group", "aws_elasticache_cluster":
 		spec, note, ok = mapElastiCache(r, res)
 	case "aws_redshift_cluster":
@@ -558,43 +558,17 @@ func mapMSK(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	}, "", true
 }
 
-// mapTGW prices transit gateway attachments via usagetype. Both the
-// gateway and each VPC attachment bill hourly under TransitGateway-Hours
-// (AmazonVPC service in the pricing dataset); data processing is usage-based.
-func mapTGW(usagetype, label string, r *parser.Resource, res *resolver.Resolver) *Spec {
-	_ = r
-	_ = res
+// flatHourly prices a resource that bills a flat hourly usagetype with no
+// resource-specific attributes (730 h/mo). TGW attachments (and the gateway
+// itself) bill under TransitGateway-Hours; EKS bills the control plane under
+// AmazonEKS-Hours:perCluster (Auto Mode instance management and extended
+// support bill separately and are not modeled); site-to-site VPN bills
+// VPN-Usage-Hours:ipsec.1 per connection (data transfer billed separately).
+func flatHourly(serviceCode, usagetype, label string) *Spec {
 	return &Spec{
-		ServiceCode: "AmazonVPC",
-		Filters: []provider.Filter{
-			tm("usagetype", usagetype),
-		},
-		UsageQty: 730, Count: 1, Label: label,
-	}
-}
-
-// mapEKSCluster prices the EKS control plane hourly fee. EKS Auto Mode
-// instance management and extended support bill under separate
-// usagetypes and are not modeled.
-func mapEKSCluster(r *parser.Resource, res *resolver.Resolver) *Spec {
-	_ = r
-	_ = res
-	return &Spec{
-		ServiceCode: "AmazonEKS",
-		Filters:     []provider.Filter{tm("usagetype", "AmazonEKS-Hours:perCluster")},
-		UsageQty:    730, Count: 1, Label: "EKS control plane",
-	}
-}
-
-// mapVPNConnection prices site-to-site VPN connections (hourly per
-// connection; data transfer billed separately).
-func mapVPNConnection(r *parser.Resource, res *resolver.Resolver) *Spec {
-	_ = r
-	_ = res
-	return &Spec{
-		ServiceCode: "AmazonVPC",
-		Filters:     []provider.Filter{tm("usagetype", "VPN-Usage-Hours:ipsec.1")},
-		UsageQty:    730, Count: 1, Label: "VPN connection",
+		ServiceCode: serviceCode,
+		Filters:     []provider.Filter{tm("usagetype", usagetype)},
+		UsageQty:    730, Count: 1, Label: label,
 	}
 }
 
