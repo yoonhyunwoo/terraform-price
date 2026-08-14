@@ -32,6 +32,7 @@ var usageTypes = map[string]string{
 	"aws_cloudwatch_log_group":    "CloudWatch Logs ingestion and storage (usage-based)",
 	"aws_cloudfront_distribution": "CloudFront data transfer and requests (usage-based)",
 	"aws_apigateway_rest_api":     "API Gateway requests (usage-based)",
+	"aws_elasticache_serverless_cache": "ElastiCache serverless: ECPU + data storage GB-month (usage-based)",
 	"aws_apigatewayv2_api":        "API Gateway requests (usage-based)",
 	"aws_codebuild_project":       "CodeBuild build minutes (usage-based)",
 	"aws_kinesis_stream":          "Kinesis shard-hours plus payload (usage-based)",
