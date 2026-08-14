@@ -9,6 +9,7 @@ type Filter struct {
 
 type Query struct {
 	Service    string
+	Region     string
 	Filters    []Filter
 	PreferUnit string
 }

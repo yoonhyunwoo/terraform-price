@@ -17,6 +17,16 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
+func buildPricer(client provider.Pricer, noCache bool, cachePath string) (provider.Pricer, *provider.Cached) {
+	var inner provider.Pricer = client
+	var cacher *provider.Cached
+	if cachePath != "" && !noCache {
+		cacher = provider.NewCached(client, cachePath, provider.CacheTTL)
+		inner = cacher
+	}
+	return awsprice.NewComposer(inner), cacher
+}
+
 func main() {
 	profileFlag := flag.String("profile", "", "AWS profile (default: tfvars account_alias)")
 	noCacheFlag := flag.Bool("no-cache", false, "bypass the AWS Price List API price cache")
@@ -62,14 +72,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	var pricer provider.Pricer = client
-	var cacher *provider.Cached
+	cachePath := ""
 	if !*noCacheFlag {
 		if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
-			cacher = provider.NewCached(client, filepath.Join(cacheDir, "terraform-price", "prices.json"), provider.CacheTTL)
-			pricer = cacher
+			cachePath = filepath.Join(cacheDir, "terraform-price", "prices.json")
 		}
 	}
+	pricer, cacher := buildPricer(client, *noCacheFlag, cachePath)
 
 	var items []output.CostItem
 	for _, r := range resources {
@@ -99,7 +108,7 @@ func main() {
 		if metaNote != "" {
 			spec.Label += " (" + metaNote + ")"
 		}
-		p, unit, err := pricer.UnitPrice(ctx, provider.Query{Service: spec.ServiceCode, Filters: spec.Filters, PreferUnit: spec.PreferUnit})
+		p, unit, err := pricer.UnitPrice(ctx, provider.Query{Service: spec.ServiceCode, Region: spec.Region, Filters: spec.Filters, PreferUnit: spec.PreferUnit})
 		if err != nil {
 			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "price lookup failed: " + err.Error()})
 			continue
@@ -127,9 +136,11 @@ func variableItem(ctx context.Context, pricer provider.Pricer, addr, typ, note s
 	if spec == nil {
 		return item
 	}
+	var lastErr error
 	for _, rt := range spec.Rates {
-		p, unit, err := pricer.UnitPrice(ctx, provider.Query{Service: rt.ServiceCode, Filters: rt.Filters, PreferUnit: rt.PreferUnit})
+		p, unit, err := pricer.UnitPrice(ctx, provider.Query{Service: rt.ServiceCode, Region: rt.Region, Filters: rt.Filters, PreferUnit: rt.PreferUnit})
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		if rt.DisplayMult > 0 {
@@ -139,6 +150,12 @@ func variableItem(ctx context.Context, pricer provider.Pricer, addr, typ, note s
 			unit = rt.DisplayUnit
 		}
 		item.Rates = append(item.Rates, output.RateLine{Label: rt.Label, UnitPrice: p, Unit: unit})
+	}
+	if lastErr != nil && len(item.Rates) == 0 {
+		if item.Note != "" {
+			item.Note += " — "
+		}
+		item.Note += "price lookup failed: " + lastErr.Error()
 	}
 	return item
 }

@@ -89,6 +89,7 @@ var freeTypes = map[string]struct{}{
 
 type Spec struct {
 	ServiceCode string
+	Region      string
 	Filters     []provider.Filter
 	UsageQty    float64
 	Count       int
@@ -101,46 +102,15 @@ type Spec struct {
 type Rate struct {
 	Label       string
 	ServiceCode string
+	Region      string
 	Filters     []provider.Filter
 	PreferUnit  string
 	DisplayMult float64
 	DisplayUnit string
 }
 
-var regionToLocation = map[string]string{
-	"ap-northeast-2": "Asia Pacific (Seoul)",
-	"ap-northeast-1": "Asia Pacific (Tokyo)",
-	"ap-northeast-3": "Asia Pacific (Osaka)",
-	"ap-southeast-1": "Asia Pacific (Singapore)",
-	"ap-southeast-2": "Asia Pacific (Sydney)",
-	"us-east-1":      "US East (N. Virginia)",
-	"us-west-2":      "US West (Oregon)",
-	"eu-west-1":      "Europe (Ireland)",
-	"eu-central-1":   "Europe (Frankfurt)",
-}
-
-var regionToUsagePrefix = map[string]string{
-	"ap-northeast-2": "APN2",
-	"ap-northeast-1": "APN1",
-	"ap-northeast-3": "APN3",
-	"ap-southeast-1": "APS1",
-	"ap-southeast-2": "APS2",
-	"us-east-1":      "USE1",
-	"us-west-2":      "USW2",
-	"eu-west-1":      "EU",
-	"eu-central-1":   "EUC1",
-}
-
 func tm(field, value string) provider.Filter {
 	return provider.Filter{Field: field, Value: value}
-}
-
-func usageType(region, base string) (string, bool) {
-	p, ok := regionToUsagePrefix[region]
-	if !ok {
-		return "", false
-	}
-	return p + "-" + base, true
 }
 
 func resStr(r *parser.Resource, res *resolver.Resolver, key string) (string, bool) {
@@ -229,12 +199,11 @@ func refResource(expr hcl.Expression, idx map[string]*parser.Resource) *parser.R
 	return idx[root.Name+"."+name.Name]
 }
 
-func ec2InstanceSpec(it, loc, label string, count int) *Spec {
+func ec2InstanceSpec(it, label string, count int) *Spec {
 	return &Spec{
 		ServiceCode: "AmazonEC2",
 		Filters: []provider.Filter{
 			tm("instanceType", it),
-			tm("location", loc),
 			tm("operatingSystem", "Linux"),
 			tm("tenancy", "Shared"),
 			tm("capacitystatus", "Used"),
@@ -254,59 +223,55 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	if desc, ok := infoTypes[r.Type]; ok {
 		return KindUnsupported, nil, desc
 	}
-	loc := regionToLocation[region]
-	if loc == "" {
-		return KindFixed, nil, "unknown region: " + region
-	}
 	kind := KindFixed
 	var spec *Spec
 	var note string
 	var ok bool
 	switch r.Type {
 	case "aws_instance":
-		spec, note, ok = mapEC2(r, res, loc)
+		spec, note, ok = mapEC2(r, res)
 	case "aws_db_instance":
-		spec, note, ok = mapRDS(r, res, loc)
+		spec, note, ok = mapRDS(r, res)
 	case "aws_rds_cluster":
-		spec, note, ok = mapAuroraCluster(r, res, loc, region)
+		spec, note, ok = mapAuroraCluster(r, res)
 		kind = KindVariable
 	case "aws_db_proxy":
-		spec, note, ok = mapDBProxy(r, res, idx, loc, region)
+		spec, note, ok = mapDBProxy(r, res, idx)
 		if ok && len(spec.Rates) == 0 {
 			kind = KindFixed
 		} else {
 			kind = KindVariable
 		}
 	case "aws_secretsmanager_secret":
-		spec, note, ok = mapSecret(r, res, loc, region)
+		spec, note, ok = mapSecret(r, res)
 	case "aws_rds_cluster_instance":
-		spec, note, ok = mapAuroraInstance(r, res, idx, loc)
+		spec, note, ok = mapAuroraInstance(r, res, idx)
 	case "aws_docdb_cluster_instance":
-		spec, note, ok = mapDBInstance(r, res, loc, "AmazonDocDB")
+		spec, note, ok = mapDBInstance(r, res, "AmazonDocDB")
 	case "aws_neptune_cluster_instance":
-		spec, note, ok = mapDBInstance(r, res, loc, "AmazonNeptune")
+		spec, note, ok = mapDBInstance(r, res, "AmazonNeptune")
 	case "aws_msk_cluster":
-		spec, note, ok = mapMSK(r, res, loc)
+		spec, note, ok = mapMSK(r, res)
 	case "aws_elasticache_replication_group", "aws_elasticache_cluster":
-		spec, note, ok = mapElastiCache(r, res, loc)
+		spec, note, ok = mapElastiCache(r, res)
 	case "aws_redshift_cluster":
-		spec, note, ok = mapRedshift(r, res, loc)
+		spec, note, ok = mapRedshift(r, res)
 	case "aws_opensearch_domain":
-		spec, note, ok = mapOpenSearch(r, res, loc)
+		spec, note, ok = mapOpenSearch(r, res)
 	case "aws_ebs_volume":
-		spec, note, ok = mapEBS(r, res, loc)
+		spec, note, ok = mapEBS(r, res)
 	case "aws_autoscaling_group":
-		spec, note, ok = mapASG(r, res, idx, loc)
+		spec, note, ok = mapASG(r, res, idx)
 	case "aws_eks_node_group":
-		spec, note, ok = mapEKSNodeGroup(r, res, idx, loc)
+		spec, note, ok = mapEKSNodeGroup(r, res, idx)
 	case "aws_nat_gateway":
-		spec, note, ok = mapNATGateway(r, res, loc, region)
+		spec, note, ok = mapNATGateway(r, res)
 	case "aws_lb":
-		spec, note, ok = mapLB(r, res, loc)
+		spec, note, ok = mapLB(r, res)
 	case "aws_vpn_gateway":
-		spec, note, ok = mapVPNGateway(r, res, loc, region)
+		spec, note, ok = mapVPNGateway(r, res)
 	case "aws_fsx_lustre_filesystem":
-		spec, note, ok = mapFSxLustre(r, res, loc, region)
+		spec, note, ok = mapFSxLustre(r, res)
 	default:
 		if p, _, _ := strings.Cut(r.Type, "_"); p != "aws" {
 			return KindUnsupported, nil, "unknown provider " + p + " (only aws is priced)"
@@ -316,10 +281,16 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	if !ok {
 		return KindFixed, nil, note
 	}
+	if spec != nil {
+		spec.Region = region
+		for i := range spec.Rates {
+			spec.Rates[i].Region = region
+		}
+	}
 	return kind, spec, note
 }
 
-func mapEC2(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
+func mapEC2(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	it, ok := resStr(r, res, "instance_type")
 	if !ok {
 		return nil, "instance_type unresolved", false
@@ -328,7 +299,7 @@ func mapEC2(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 	if t, ok := resStr(r, res, "tenancy"); ok {
 		tenancy = t
 	}
-	spec := ec2InstanceSpec(it, loc, it, 1)
+	spec := ec2InstanceSpec(it, it, 1)
 	for i, f := range spec.Filters {
 		if f.Field == "tenancy" {
 			spec.Filters[i] = tm("tenancy", tenancy)
@@ -337,7 +308,7 @@ func mapEC2(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 	return spec, "", true
 }
 
-func mapRDS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
+func mapRDS(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	ic, ok := resStr(r, res, "instance_class")
 	if !ok {
 		return nil, "instance_class unresolved", false
@@ -354,7 +325,6 @@ func mapRDS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 		ServiceCode: "AmazonRDS",
 		Filters: []provider.Filter{
 			tm("instanceType", ic),
-			tm("location", loc),
 			tm("databaseEngine", rdsEngine(engine)),
 			tm("deploymentOption", deploy),
 		},
@@ -362,7 +332,7 @@ func mapRDS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 	}, "", true
 }
 
-func mapAuroraInstance(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, loc string) (*Spec, string, bool) {
+func mapAuroraInstance(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) (*Spec, string, bool) {
 	ic, ok := resStr(r, res, "instance_class")
 	if !ok {
 		return nil, "instance_class unresolved", false
@@ -380,7 +350,6 @@ func mapAuroraInstance(r *parser.Resource, res *resolver.Resolver, idx map[strin
 		ServiceCode: "AmazonRDS",
 		Filters: []provider.Filter{
 			tm("instanceType", ic),
-			tm("location", loc),
 			tm("databaseEngine", auroraEngine(engine)),
 			tm("deploymentOption", "Single-AZ"),
 		},
@@ -388,63 +357,40 @@ func mapAuroraInstance(r *parser.Resource, res *resolver.Resolver, idx map[strin
 	}, "", true
 }
 
-func mapAuroraCluster(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
+func mapAuroraCluster(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	st, _ := resStr(r, res, "storage_type")
-	storRate := func(base, label string) (Rate, bool) {
-		ut, ok := usageType(region, base)
-		if !ok {
-			return Rate{}, false
-		}
+	rate := func(base, label, unit, displayUnit string, mult float64) Rate {
 		return Rate{
 			Label: label, ServiceCode: "AmazonRDS",
-			Filters:    []provider.Filter{tm("usagetype", ut), tm("location", loc)},
-			PreferUnit: "GB-Mo", DisplayUnit: "GB-mo",
-		}, true
+			Filters:     []provider.Filter{tm("usagetype", base)},
+			PreferUnit:  unit,
+			DisplayMult: mult, DisplayUnit: displayUnit,
+		}
 	}
 	var rates []Rate
 	if st == "aurora-iopt1" {
-		rt, ok := storRate("Aurora:IO-OptimizedStorageUsage", "storage (I/O-Optimized)")
-		if !ok {
-			return nil, "Aurora usagetype (region) unresolved", false
-		}
-		rates = []Rate{rt}
+		rates = []Rate{rate("Aurora:IO-OptimizedStorageUsage", "storage (I/O-Optimized)", "GB-Mo", "GB-mo", 0)}
 	} else {
-		stor, ok := storRate("Aurora:StorageUsage", "storage")
-		if !ok {
-			return nil, "Aurora usagetype (region) unresolved", false
+		rates = []Rate{
+			rate("Aurora:StorageUsage", "storage", "GB-Mo", "GB-mo", 0),
+			rate("Aurora:StorageIOUsage", "I/O", "IOs", "1M I/O", 1_000_000),
 		}
-		ioUT, _ := usageType(region, "Aurora:StorageIOUsage")
-		rates = []Rate{stor, {
-			Label: "I/O", ServiceCode: "AmazonRDS",
-			Filters:     []provider.Filter{tm("usagetype", ioUT), tm("location", loc)},
-			PreferUnit:  "IOs",
-			DisplayMult: 1_000_000, DisplayUnit: "1M I/O",
-		}}
 	}
 	return &Spec{Label: "Aurora storage & I/O", Note: "Aurora storage & I/O — billed by usage (instances are priced via aws_rds_cluster_instance)", Rates: rates}, "", true
 }
 
-func mapSecret(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
-	ut, ok := usageType(region, "AWSSecretsManager-Secrets")
-	if !ok {
-		return nil, "Secrets Manager usagetype (region) unresolved", false
-	}
+func mapSecret(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	return &Spec{
 		ServiceCode: "AWSSecretsManager",
 		Filters: []provider.Filter{
-			tm("usagetype", ut),
-			tm("location", loc),
+			tm("usagetype", "AWSSecretsManager-Secrets"),
 		},
 		UsageQty: 1, Count: 1, Label: "Secret", PreferUnit: "Secrets",
 	}, "", true
 }
 
-func mapDBProxy(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, loc, region string) (*Spec, string, bool) {
-	ut, ok := usageType(region, "RDS:ProxyUsage")
-	if !ok {
-		return nil, "RDS Proxy usagetype (region) unresolved", false
-	}
-	filters := []provider.Filter{tm("usagetype", ut), tm("location", loc)}
+func mapDBProxy(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) (*Spec, string, bool) {
+	filters := []provider.Filter{tm("usagetype", "RDS:ProxyUsage")}
 	if vcpu := proxyTargetVCPU(r, res, idx); vcpu > 0 {
 		return &Spec{
 			ServiceCode: "AmazonRDS", Filters: filters,
@@ -529,7 +475,7 @@ func auroraEngine(e string) string {
 	return "Aurora MySQL"
 }
 
-func mapDBInstance(r *parser.Resource, res *resolver.Resolver, loc, serviceCode string) (*Spec, string, bool) {
+func mapDBInstance(r *parser.Resource, res *resolver.Resolver, serviceCode string) (*Spec, string, bool) {
 	ic, ok := resStr(r, res, "instance_class")
 	if !ok {
 		return nil, "instance_class unresolved", false
@@ -538,14 +484,13 @@ func mapDBInstance(r *parser.Resource, res *resolver.Resolver, loc, serviceCode 
 		ServiceCode: serviceCode,
 		Filters: []provider.Filter{
 			tm("instanceType", ic),
-			tm("location", loc),
 			tm("deploymentOption", "Single-AZ"),
 		},
 		UsageQty: 730, Count: 1, Label: ic,
 	}, "", true
 }
 
-func mapRedshift(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
+func mapRedshift(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	it, ok := resStr(r, res, "node_type")
 	if !ok {
 		return nil, "node_type unresolved", false
@@ -558,13 +503,12 @@ func mapRedshift(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec,
 		ServiceCode: "AmazonRedshift",
 		Filters: []provider.Filter{
 			tm("instanceType", it),
-			tm("location", loc),
 		},
 		UsageQty: 730, Count: count, Label: fmt.Sprintf("%s × %d nodes", it, count),
 	}, "", true
 }
 
-func mapOpenSearch(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
+func mapOpenSearch(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	it, ok := resStr(r, res, "cluster_config.instance_type")
 	if !ok {
 		return nil, "cluster_config.instance_type unresolved", false
@@ -577,13 +521,12 @@ func mapOpenSearch(r *parser.Resource, res *resolver.Resolver, loc string) (*Spe
 		ServiceCode: "AmazonOpenSearchService",
 		Filters: []provider.Filter{
 			tm("instanceType", it),
-			tm("location", loc),
 		},
 		UsageQty: 730, Count: count, Label: fmt.Sprintf("%s × %d nodes", it, count),
 	}, "", true
 }
 
-func mapMSK(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
+func mapMSK(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	it, ok := resStr(r, res, "broker_node_group_info.instance_type")
 	if !ok {
 		return nil, "broker instance_type unresolved", false
@@ -598,13 +541,12 @@ func mapMSK(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 		Filters: []provider.Filter{
 			tm("computeFamily", computeFamily),
 			tm("operation", "RunBroker"),
-			tm("location", loc),
 		},
 		UsageQty: 730, Count: count, Label: fmt.Sprintf("%s × %d brokers", it, count),
 	}, "", true
 }
 
-func mapElastiCache(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
+func mapElastiCache(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	nt, ok := resStr(r, res, "node_type")
 	if !ok {
 		return nil, "node_type unresolved", false
@@ -624,14 +566,13 @@ func mapElastiCache(r *parser.Resource, res *resolver.Resolver, loc string) (*Sp
 		ServiceCode: "AmazonElastiCache",
 		Filters: []provider.Filter{
 			tm("instanceType", nt),
-			tm("location", loc),
 			tm("cacheEngine", engine),
 		},
 		UsageQty: 730, Count: count, Label: fmt.Sprintf("%s × %d nodes", nt, count),
 	}, "", true
 }
 
-func mapEBS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
+func mapEBS(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	size, ok := resNum(r, res, "size")
 	if !ok {
 		return nil, "size unresolved", false
@@ -644,14 +585,13 @@ func mapEBS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 		ServiceCode: "AmazonEC2",
 		Filters: []provider.Filter{
 			tm("volumeApiName", vtype),
-			tm("location", loc),
 		},
 		UsageQty: size, Count: 1, Label: fmt.Sprintf("%s %gGB", vtype, size),
 		PreferUnit: "GB-Mo",
 	}, "", true
 }
 
-func mapASG(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, loc string) (*Spec, string, bool) {
+func mapASG(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) (*Spec, string, bool) {
 	count := 0
 	for _, k := range []string{"desired_capacity", "min_size"} {
 		if n, ok := resNum(r, res, k); ok && n > 0 {
@@ -674,10 +614,10 @@ func mapASG(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.R
 	if count == 0 {
 		return nil, "ASG capacity (desired/min) unresolved", false
 	}
-	return ec2InstanceSpec(it, loc, fmt.Sprintf("%s × %d (ASG)", it, count), count), "", true
+	return ec2InstanceSpec(it, fmt.Sprintf("%s × %d (ASG)", it, count), count), "", true
 }
 
-func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, loc string) (*Spec, string, bool) {
+func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) (*Spec, string, bool) {
 	count := 0
 	if n, ok := resNum(r, res, "scaling_config.desired_size"); ok && n > 0 {
 		count = int(n)
@@ -712,40 +652,30 @@ func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]
 	if count == 0 {
 		return nil, "EKS node group desired_size unresolved", false
 	}
-	return ec2InstanceSpec(it, loc, fmt.Sprintf("%s × %d (EKS node)%s", it, count, multiType), count), "", true
+	return ec2InstanceSpec(it, fmt.Sprintf("%s × %d (EKS node)%s", it, count, multiType), count), "", true
 }
 
-func mapNATGateway(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
-	ut, ok := usageType(region, "NatGateway-Hours")
-	if !ok {
-		return nil, "NAT GW usagetype (region) unresolved", false
-	}
+func mapNATGateway(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	return &Spec{
 		ServiceCode: "AmazonEC2",
 		Filters: []provider.Filter{
-			tm("usagetype", ut),
-			tm("location", loc),
+			tm("usagetype", "NatGateway-Hours"),
 		},
 		UsageQty: 730, Count: 1, Label: "NAT Gateway", PreferUnit: "Hrs",
 	}, "", true
 }
 
-func mapVPNGateway(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
-	ut, ok := usageType(region, "VPNGateway-Hours")
-	if !ok {
-		return nil, "VPN GW usagetype (region) unresolved", false
-	}
+func mapVPNGateway(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	return &Spec{
 		ServiceCode: "AmazonEC2",
 		Filters: []provider.Filter{
-			tm("usagetype", ut),
-			tm("location", loc),
+			tm("usagetype", "VPNGateway-Hours"),
 		},
 		UsageQty: 730, Count: 1, Label: "VPN Gateway", PreferUnit: "Hrs",
 	}, "", true
 }
 
-func mapLB(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
+func mapLB(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	lbt, ok := resStr(r, res, "load_balancer_type")
 	if !ok || lbt == "" {
 		return nil, "load_balancer_type unresolved", false
@@ -755,27 +685,21 @@ func mapLB(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, strin
 		ServiceCode: "AmazonElasticLoadBalancing",
 		Filters: []provider.Filter{
 			tm("loadBalancerType", lbt),
-			tm("location", loc),
 		},
 		UsageQty: 730, Count: 1, Label: lbt + " LB", PreferUnit: "Hrs",
 	}, "", true
 }
 
-func mapFSxLustre(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
+func mapFSxLustre(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	size, ok := resNum(r, res, "storage_capacity")
 	if !ok {
 		return nil, "storage_capacity unresolved", false
-	}
-	ut, ok := usageType(region, "FSxLustre-Storage-GB-Mo")
-	if !ok {
-		return nil, "FSx usagetype (region) unresolved", false
 	}
 	return &Spec{
 		ServiceCode: "AmazonFSx",
 		Filters: []provider.Filter{
 			tm("fileSystemType", "LUSTRE"),
-			tm("usagetype", ut),
-			tm("location", loc),
+			tm("usagetype", "FSxLustre-Storage-GB-Mo"),
 		},
 		UsageQty: size, Count: 1, Label: fmt.Sprintf("Lustre %gGB", size), PreferUnit: "GB-Mo",
 	}, "", true

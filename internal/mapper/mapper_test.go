@@ -129,13 +129,34 @@ resource "aws_redshift_cluster" "c" {
 	}
 }
 
-func TestUsageTypeRegionPrefix(t *testing.T) {
-	got, ok := usageType("ap-northeast-2", "NatGateway-Hours")
-	if !ok || got != "APN2-NatGateway-Hours" {
-		t.Errorf("usageType Seoul: want APN2-NatGateway-Hours, got %q ok=%v", got, ok)
-	}
-	if _, ok := usageType("ap-outer-mongolia-1", "X"); ok {
-		t.Errorf("unknown region should return ok=false")
+func TestSpecCarriesRegionAndNoLocationFilter(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "main.tf", `
+resource "aws_instance" "web" { instance_type = "t3.micro" }
+resource "aws_rds_cluster" "aurora" { }`)
+	rs, _ := parser.ParseDir(dir)
+	res := resolver.NewResolver(dir)
+	for _, r := range rs {
+		_, spec, _ := MapResource(r, res, idxOf(rs), "ap-northeast-2")
+		if spec == nil {
+			t.Fatalf("%s: no spec", r.Type)
+		}
+		if spec.Region != "ap-northeast-2" {
+			t.Errorf("%s: spec.Region = %q, want ap-northeast-2", r.Type, spec.Region)
+		}
+		for _, rt := range spec.Rates {
+			if rt.Region != "ap-northeast-2" {
+				t.Errorf("%s: rate %q Region = %q", r.Type, rt.Label, rt.Region)
+			}
+		}
+		for _, f := range spec.Filters {
+			if f.Field == "location" {
+				t.Errorf("%s: location filter must not live in mapper filters (awsprice composes it)", r.Type)
+			}
+			if f.Field == "usagetype" && strings.Contains(f.Value, "-") && !strings.Contains(f.Value, ":") {
+				t.Errorf("%s: usagetype filter %q looks region-prefixed; mapper must pass the neutral base only", r.Type, f.Value)
+			}
+		}
 	}
 }
 
@@ -148,8 +169,8 @@ func TestMapNATGatewayUsagetype(t *testing.T) {
 	if kind != KindFixed || spec == nil {
 		t.Fatalf("got kind=%v spec=%v note=%q", kind, spec, note)
 	}
-	if got := filterVal(spec, "usagetype"); got != "APN2-NatGateway-Hours" {
-		t.Errorf("usagetype filter: want APN2-NatGateway-Hours, got %q", got)
+	if got := filterVal(spec, "usagetype"); got != "NatGateway-Hours" {
+		t.Errorf("usagetype filter: want neutral base NatGateway-Hours (awsprice adds the region prefix), got %q", got)
 	}
 	if spec.PreferUnit != "Hrs" {
 		t.Errorf("PreferUnit: want Hrs, got %q", spec.PreferUnit)
@@ -182,8 +203,8 @@ func TestMapFSxLustre(t *testing.T) {
 	if spec.UsageQty != 1200 {
 		t.Errorf("UsageQty: want 1200, got %g", spec.UsageQty)
 	}
-	if filterVal(spec, "usagetype") != "APN2-FSxLustre-Storage-GB-Mo" {
-		t.Errorf("usagetype: want APN2-FSxLustre-Storage-GB-Mo, got %q", filterVal(spec, "usagetype"))
+	if filterVal(spec, "usagetype") != "FSxLustre-Storage-GB-Mo" {
+		t.Errorf("usagetype: want neutral base FSxLustre-Storage-GB-Mo, got %q", filterVal(spec, "usagetype"))
 	}
 }
 
@@ -359,7 +380,7 @@ resource "aws_eks_node_group" "ng" {
 // Regression: null or scalar instance_types used to panic at LengthInt.
 func TestEKSInstanceTypesNullNoPanic(t *testing.T) {
 	for name, body := range map[string]string{
-		"null":  `instance_types = null`,
+		"null":   `instance_types = null`,
 		"scalar": `instance_types = "t3.medium"`,
 	} {
 		func() {
