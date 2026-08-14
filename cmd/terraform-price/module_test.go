@@ -115,13 +115,45 @@ module "off" {
 	}
 }
 
-// Registry/remote sources keep the generic info row, no expansion.
-func TestRegistryModuleInfoRow(t *testing.T) {
+// Public-registry modules are fetched and expanded like local modules.
+// Uses a fake registry (httptest) so the test is offline.
+func TestRegistryModuleExpansion(t *testing.T) {
+	srv := fakeRegistry(t, "test", "mod", "aws", "1.2.0", modMain)
+	oldBase, oldCache := registryBase, moduleCacheDir
+	registryBase = srv.URL
+	moduleCacheDir = func() (string, error) { return t.TempDir(), nil }
+	t.Cleanup(func() { registryBase, moduleCacheDir = oldBase, oldCache })
+
+	root := writeModuleFixture(t, map[string]string{
+		"main.tf": `
+module "m" {
+  source  = "test/mod/aws"
+  version = "~> 1.0"
+}
+`,
+	})
+	items, err := analyze(context.Background(), fakePricer{}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := itemOf(t, items, "module.m.aws_instance.x")
+	if it.Spec != "t3.micro" {
+		t.Fatalf("registry module item = %+v, want t3.micro via variable default", it)
+	}
+}
+
+// An unfetchable registry module degrades to the generic info row.
+func TestUnfetchableModuleInfoRow(t *testing.T) {
+	oldBase, oldCache := registryBase, moduleCacheDir
+	registryBase = "http://127.0.0.1:0" // unreachable
+	moduleCacheDir = func() (string, error) { return t.TempDir(), nil }
+	t.Cleanup(func() { registryBase, moduleCacheDir = oldBase, oldCache })
+
 	root := writeModuleFixture(t, map[string]string{
 		"main.tf": `
 module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0"
+  source  = "no-such-namespace/definitely-not-real/aws"
+  version = "1.0.0"
 }
 `,
 	})
@@ -131,7 +163,7 @@ module "vpc" {
 	}
 	it := itemOf(t, items, "module.vpc")
 	if it.Kind != output.Unsupported || it.Note == "" {
-		t.Fatalf("registry module row = %+v, want unsupported with note", it)
+		t.Fatalf("unfetchable module row = %+v, want unsupported with note", it)
 	}
 }
 
@@ -197,8 +229,8 @@ module "app" {
   instance_type = "t3.medium"
 }
 `,
-		"mod/main.tf":            modMain,
-		"mod/terraform.tfvars":   `instance_type = "t3.micro"`,
+		"mod/main.tf":          modMain,
+		"mod/terraform.tfvars": `instance_type = "t3.micro"`,
 	})
 	items, err := analyze(context.Background(), fakePricer{}, root)
 	if err != nil {

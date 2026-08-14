@@ -110,8 +110,9 @@ var moduleMetaAttrs = map[string]bool{
 
 // analyzeModule prices one module block. Local-path sources are
 // expanded recursively with the block's input values layered over the
-// module's own variable defaults; registry/remote sources keep the
-// generic "not parsed" info row.
+// module's own variable defaults; public-registry sources are fetched
+// from the registry tarball (cached) and expanded the same way.
+// Anything unfetchable keeps the generic "not parsed" info row.
 func analyzeModule(ctx context.Context, pricer provider.Pricer, dir, region, prefix string, parent *resolver.Resolver, m *parser.Resource, depth int) ([]output.CostItem, error) {
 	addr := prefix + "module." + m.Name
 	// Gate on the module block's own count/for_each: 0 creates nothing.
@@ -125,14 +126,11 @@ func analyzeModule(ctx context.Context, pricer provider.Pricer, dir, region, pre
 			src = v.AsString()
 		}
 	}
-	modDir := filepath.Clean(filepath.Join(dir, src))
-	local := src != "" && !strings.Contains(src, "//") && !strings.Contains(src, "://")
-	if local {
-		if st, err := os.Stat(modDir); err != nil || !st.IsDir() {
-			local = false
-		}
+	modDir := localModuleDir(dir, src)
+	if modDir == "" {
+		modDir = registryModuleDir(m, parent, src)
 	}
-	if !local || depth >= maxModuleDepth {
+	if modDir == "" || depth >= maxModuleDepth {
 		kind, _, note := mapper.MapResource(m, parent, nil, region)
 		return []output.CostItem{classifyItem(kind, addr, m.Type, note)}, nil
 	}
@@ -147,6 +145,47 @@ func analyzeModule(ctx context.Context, pricer provider.Pricer, dir, region, pre
 		}
 	}
 	return analyzeDir(ctx, pricer, modDir, region, addr+".", inputs, depth+1)
+}
+
+// localModuleDir resolves a "./" / "../" source to a directory, or ""
+// when the source is remote/registry-shaped.
+func localModuleDir(dir, src string) string {
+	if src == "" || strings.Contains(src, "://") || strings.HasPrefix(src, "git::") {
+		return ""
+	}
+	if parseRegistrySource(src) != nil {
+		return ""
+	}
+	modDir := filepath.Clean(filepath.Join(dir, src))
+	if st, err := os.Stat(modDir); err != nil || !st.IsDir() {
+		return ""
+	}
+	return modDir
+}
+
+// registryModuleDir fetches a public-registry module (exact or ~>-pinned
+// version, else latest) into the cache and returns its directory; "" on
+// any failure. A `version` attr of the module block is the pin.
+func registryModuleDir(m *parser.Resource, parent *resolver.Resolver, src string) string {
+	rs := parseRegistrySource(src)
+	if rs == nil {
+		return ""
+	}
+	pin := ""
+	if e, ok := m.Exprs["version"]; ok {
+		if v, ok := parent.ResolveExpr(e); ok && v.IsKnown() && !v.IsNull() && v.Type() == cty.String {
+			pin = v.AsString()
+		}
+	}
+	version, err := resolveVersion(rs, pin)
+	if err != nil {
+		return ""
+	}
+	dir, ok := fetchRegistryModule(rs, version)
+	if !ok {
+		return ""
+	}
+	return dir
 }
 
 // priceResources maps and prices a directory's direct resources.

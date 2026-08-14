@@ -58,3 +58,17 @@ reference computed resource attributes and stay pending until `SetResources` +
 environment variables. `parser.ParseDir` is a separate path and reads every
 `*.tf`. Symptom of the remaining gap: a resource prints `unresolved: …` even
 though its value is defined in a non-standard var source.
+
+## Module blocks are instantiated, not skipped
+
+`analyze` in `cmd/terraform-price` recurses into module blocks: local-path sources
+(`./…`, `../…`) directly, and public-registry sources (`ns/name/provider`, optional
+`//subdir`) by fetching the published tarball via the registry download endpoint
+(`X-Terraform-Get` → codeload for GitHub) into
+`$UserCacheDir/terraform-price/modules/` — see `modfetch.go`. The module block's
+input values are evaluated in the parent scope and injected as the child's vars
+(`NewResolverWithVars`); inputs win over the child dir's own tfvars, and the child's
+`variable` defaults backstop unset inputs. `count = 0` on the block gates the whole
+instance. Anything unfetchable (registry down, git:: sources, private modules)
+degrades to the generic info row — never an error. Module outputs referenced in the
+parent (`module.x.out`) are still unresolved; that is the known boundary.
