@@ -51,7 +51,7 @@ var infoTypes = map[string]string{
 	"aws_vpc_endpoint":            "VPC endpoint — per-service hourly (not priced yet)",
 	"aws_kms_key":                 "KMS key — $1/month flat (Price List unit needs live confirmation)",
 	"aws_route53_zone":            "Route53 hosted zone — $0.50/month global (price needs live confirmation)",
-	"module":                      "module block — contents not parsed, resources inside are not estimated",
+	"module":                      "module source not analyzable (git::/private/unfetchable) — resources inside are not estimated",
 	"aws_fsx_windows_file_system": "FSx Windows — GB-month (only Lustre is priced)",
 	"aws_fsx_ontap_file_system":   "FSx ONTAP — GB-month (only Lustre is priced)",
 	"aws_fsx_openzfs_file_system": "FSx OpenZFS — GB-month (only Lustre is priced)",

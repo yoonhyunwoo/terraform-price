@@ -21,6 +21,10 @@ import (
 // directory's tfvars do not set aws_region.
 const defaultRegion = "ap-northeast-2"
 
+// gatedResourceNote marks a resource whose count/for_each resolved to 0:
+// it is not created, so nothing is priced.
+const gatedResourceNote = "count = 0 — resource not created"
+
 // analyze parses the Terraform directory and prices every resource,
 // recursively expanding local-path module blocks with their input
 // values. The region comes from the root directory's tfvars
@@ -194,9 +198,11 @@ func priceResources(ctx context.Context, pricer provider.Pricer, resources []*pa
 	for _, r := range resources {
 		addr := prefix + r.Type + "." + r.Name
 		// count/for_each = 0 gates everything: the resource is not created,
-		// so resolution failures below are moot.
-		if n, metaNote := metaCount(r, res); n == 0 && metaNote == "" {
-			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "count = 0 — resource not created"})
+		// so resolution failures below are moot. metaCount returns a note
+		// whenever it falls back to 1, so n == 0 always means a resolved 0.
+		n, metaNote := metaCount(r, res)
+		if n == 0 {
+			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: gatedResourceNote})
 			continue
 		}
 		kind, spec, note := mapper.MapResource(r, res, idx, region)
@@ -210,11 +216,6 @@ func priceResources(ctx context.Context, pricer provider.Pricer, resources []*pa
 		}
 		if spec == nil {
 			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: note})
-			continue
-		}
-		n, metaNote := metaCount(r, res)
-		if n == 0 {
-			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "count = 0 — resource not created"})
 			continue
 		}
 		spec.Count *= n
