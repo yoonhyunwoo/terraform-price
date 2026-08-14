@@ -11,8 +11,8 @@ import (
 	ptypes "github.com/aws/aws-sdk-go-v2/service/pricing/types"
 	"github.com/zclconf/go-cty/cty"
 
-	"terraform-price/internal/parser"
-	"terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
 
 type Kind int

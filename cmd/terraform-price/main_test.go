@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"terraform-price/internal/mapper"
-	"terraform-price/internal/output"
+	"github.com/yoonhyunwoo/terraform-price/internal/mapper"
+	"github.com/yoonhyunwoo/terraform-price/internal/output"
 )
 
 func TestClassifyItemWiring(t *testing.T) {

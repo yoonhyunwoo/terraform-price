@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"terraform-price/internal/parser"
-	"terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
 
 func writeFile(t *testing.T, dir, name, body string) {

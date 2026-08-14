@@ -1,4 +1,4 @@
-module terraform-price
+module github.com/yoonhyunwoo/terraform-price
 
 go 1.26.1
 

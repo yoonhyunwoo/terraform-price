@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"terraform-price/internal/mapper"
-	"terraform-price/internal/output"
-	"terraform-price/internal/parser"
-	"terraform-price/internal/price"
-	"terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/mapper"
+	"github.com/yoonhyunwoo/terraform-price/internal/output"
+	"github.com/yoonhyunwoo/terraform-price/internal/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/price"
+	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
 
 func main() {
