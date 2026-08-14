@@ -29,8 +29,11 @@ func (fakePricer) UnitPrice(_ context.Context, q provider.Query) (float64, strin
 				return 0.08, "GB-Mo", nil
 			}
 		case "usagetype":
-			if f.Value == "NatGateway-Hours" {
+			switch f.Value {
+			case "NatGateway-Hours":
 				return 0.045, "Hrs", nil
+			case "RDS:GP3-Storage":
+				return 0.131, "GB-Mo", nil
 			}
 		}
 	}

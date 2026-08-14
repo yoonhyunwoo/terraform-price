@@ -606,6 +606,105 @@ func mapElastiCache(r *parser.Resource, res *resolver.Resolver) (*Spec, string, 
 	}, "", true
 }
 
+// ExtraSpecs prices storage attached to a resource beyond its primary
+// line: instance root/data EBS blocks, EKS node group root disks, and
+// RDS allocated storage. Count is the instance count; each spec's count
+// multiplies by it.
+func ExtraSpecs(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) []*Spec {
+	switch r.Type {
+	case "aws_instance":
+		return instanceStorageSpecs(r, res)
+	case "aws_eks_node_group":
+		return nodeGroupStorageSpecs(r, res)
+	case "aws_db_instance", "aws_rds_cluster_instance":
+		return rdsStorageSpecs(r, res)
+	}
+	return nil
+}
+
+func ebsSpec(size float64, vtype, label string) *Spec {
+	return &Spec{
+		ServiceCode: "AmazonEC2",
+		Filters:     []provider.Filter{tm("volumeApiName", vtype)},
+		UsageQty:    size, Count: 1, Label: fmt.Sprintf("%s %gGB (%s)", vtype, size, label),
+		PreferUnit: "GB-Mo",
+	}
+}
+
+func instanceStorageSpecs(r *parser.Resource, res *resolver.Resolver) []*Spec {
+	var out []*Spec
+	if size, ok := resNum(r, res, "root_block_device.size"); ok && size > 0 {
+		vtype := "gp3"
+		if t, ok := resStr(r, res, "root_block_device.type"); ok && t != "" {
+			vtype = t
+		}
+		out = append(out, ebsSpec(size, vtype, "root"))
+	}
+	if size, ok := resNum(r, res, "ebs_block_device.size"); ok && size > 0 {
+		vtype := "gp2"
+		if t, ok := resStr(r, res, "ebs_block_device.type"); ok && t != "" {
+			vtype = t
+		}
+		out = append(out, ebsSpec(size, vtype, "EBS"))
+	}
+	return out
+}
+
+func nodeGroupStorageSpecs(r *parser.Resource, res *resolver.Resolver) []*Spec {
+	size, ok := resNum(r, res, "disk_size")
+	label := "node root"
+	if !ok || size <= 0 {
+		// No explicit disk and no live launch template (dynamic content
+		// keys always exist, so probe resolvability): the EKS API
+		// defaults the node root volume to 20GB gp3.
+		if lt := lookupExpr(r, []string{"launch_template.id", "launch_template.name", "launch_template_name"}); lt != nil {
+			if id, ok := resStr(r, res, "launch_template.id"); ok && id != "" {
+				return nil
+			}
+			if nm, ok := resStr(r, res, "launch_template.name"); ok && nm != "" {
+				return nil
+			}
+			if nm, ok := resStr(r, res, "launch_template_name"); ok && nm != "" {
+				return nil
+			}
+		}
+		size, label = 20, "node root, API default"
+	}
+	return []*Spec{ebsSpec(size, "gp3", label)}
+}
+
+func rdsStorageSpecs(r *parser.Resource, res *resolver.Resolver) []*Spec {
+	size, ok := resNum(r, res, "allocated_storage")
+	if !ok || size <= 0 {
+		return nil
+	}
+	engine, _ := resStr(r, res, "engine")
+	vtype, hasType := resStr(r, res, "storage_type")
+	if !hasType || vtype == "" {
+		vtype = "gp3"
+	}
+	usagetype := "RDS:GP3-Storage"
+	multi := resBool(r, res, "multi_az")
+	switch {
+	case vtype == "gp3" && multi:
+		usagetype = "RDS:Multi-AZ-GP3-Storage"
+	case vtype == "gp2":
+		usagetype = "RDS:StorageUsage"
+		if multi {
+			usagetype = "RDS:Multi-AZ-StorageUsage"
+		}
+	}
+	return []*Spec{{
+		ServiceCode: "AmazonRDS",
+		Filters: []provider.Filter{
+			tm("usagetype", usagetype),
+			tm("databaseEngine", rdsEngine(engine)),
+		},
+		UsageQty: size, Count: 1, Label: fmt.Sprintf("%s storage %gGB", vtype, size),
+		PreferUnit: "GB-Mo",
+	}}
+}
+
 func mapEBS(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	size, ok := resNum(r, res, "size")
 	if !ok {

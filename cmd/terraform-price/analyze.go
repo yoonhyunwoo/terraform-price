@@ -350,9 +350,9 @@ func priceResources(ctx context.Context, pricer provider.Pricer, resources []*pa
 			// (instance_types = each.value.node_instance_types) resolve.
 			for _, it := range each {
 				res.SetResourceEach(it.keyVal, it.val)
-				item := priceOneResource(ctx, pricer, r, res, idx, region, fmt.Sprintf("%s[%q]", addr, it.key), 1, "")
+				row := priceOneResource(ctx, pricer, r, res, idx, region, fmt.Sprintf("%s[%q]", addr, it.key), 1, "")
 				res.ClearResourceEach()
-				items = append(items, item)
+				items = append(items, row...)
 			}
 			continue
 		}
@@ -364,21 +364,21 @@ func priceResources(ctx context.Context, pricer provider.Pricer, resources []*pa
 			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: gatedResourceNote})
 			continue
 		}
-		items = append(items, priceOneResource(ctx, pricer, r, res, idx, region, addr, n, metaNote))
+		items = append(items, priceOneResource(ctx, pricer, r, res, idx, region, addr, n, metaNote)...)
 	}
 	return items, nil
 }
 
-func priceOneResource(ctx context.Context, pricer provider.Pricer, r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, region, addr string, n int, metaNote string) output.CostItem {
+func priceOneResource(ctx context.Context, pricer provider.Pricer, r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, region, addr string, n int, metaNote string) []output.CostItem {
 	kind, spec, note := mapper.MapResource(r, res, idx, region)
 	if kind == mapper.KindVariable {
-		return variableItem(ctx, pricer, addr, r.Type, note, spec)
+		return []output.CostItem{variableItem(ctx, pricer, addr, r.Type, note, spec)}
 	}
 	if kind != mapper.KindFixed {
-		return classifyItem(kind, addr, r.Type, note)
+		return []output.CostItem{classifyItem(kind, addr, r.Type, note)}
 	}
 	if spec == nil {
-		return output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: note}
+		return []output.CostItem{{Kind: output.Fixed, Addr: addr, Unresolved: note}}
 	}
 	spec.Count *= n
 	if n > 1 {
@@ -387,12 +387,25 @@ func priceOneResource(ctx context.Context, pricer provider.Pricer, r *parser.Res
 	if metaNote != "" {
 		spec.Label += " (" + metaNote + ")"
 	}
+	items := []output.CostItem{pricedItem(ctx, pricer, addr, r.Type, spec)}
+	for _, extra := range mapper.ExtraSpecs(r, res, idx) {
+		extra.Region = region
+		for i := range extra.Rates {
+			extra.Rates[i].Region = region
+		}
+		extra.Count *= spec.Count
+		items = append(items, pricedItem(ctx, pricer, addr, r.Type, extra))
+	}
+	return items
+}
+
+func pricedItem(ctx context.Context, pricer provider.Pricer, addr, typ string, spec *mapper.Spec) output.CostItem {
 	p, unit, err := pricer.UnitPrice(ctx, provider.Query{Service: spec.ServiceCode, Region: spec.Region, Filters: spec.Filters, PreferUnit: spec.PreferUnit})
 	if err != nil {
 		return output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "price lookup failed: " + err.Error()}
 	}
 	return output.CostItem{
-		Kind: output.Fixed, Addr: addr, Type: r.Type, Spec: spec.Label,
+		Kind: output.Fixed, Addr: addr, Type: typ, Spec: spec.Label,
 		UnitPrice: p, Unit: unit, Monthly: p * spec.UsageQty * float64(spec.Count),
 	}
 }
