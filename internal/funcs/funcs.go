@@ -203,6 +203,8 @@ func Core() map[string]function.Function {
 		"range":        stdlib.RangeFunc,
 		"zipmap":       stdlib.ZipmapFunc,
 		"setunion":     stdlib.SetUnionFunc,
+		"setproduct":   stdlib.SetProductFunc,
+		"chunklist":    stdlib.ChunklistFunc,
 		"setintersect": stdlib.SetIntersectionFunc,
 		"setsubtract":  stdlib.SetSubtractFunc,
 

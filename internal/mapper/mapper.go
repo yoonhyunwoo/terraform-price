@@ -33,6 +33,9 @@ var usageTypes = map[string]string{
 	"aws_cloudfront_distribution": "CloudFront data transfer and requests (usage-based)",
 	"aws_apigateway_rest_api":     "API Gateway requests (usage-based)",
 	"aws_elasticache_serverless_cache": "ElastiCache serverless: ECPU + data storage GB-month (usage-based)",
+	"aws_lb_listener":                 "ALB/NLB LCU or data processing (usage-based)",
+	"aws_lambda_provisioned_concurrency_config": "Provisioned concurrency GB-hours (memory size × concurrency, usage-based)",
+	"aws_s3_directory_bucket":          "S3 Express One Zone storage and requests (usage-based)",
 	"aws_apigatewayv2_api":        "API Gateway requests (usage-based)",
 	"aws_codebuild_project":       "CodeBuild build minutes (usage-based)",
 	"aws_kinesis_stream":          "Kinesis shard-hours plus payload (usage-based)",
@@ -55,6 +58,8 @@ var infoTypes = map[string]string{
 }
 
 var freeTypes = map[string]struct{}{
+	"aws_ecs_capacity_provider":            {},
+	"aws_ecs_cluster_capacity_providers":   {},
 	"aws_iam_role":                      {},
 	"aws_iam_policy":                    {},
 	"aws_iam_policy_attachment":         {},
@@ -253,6 +258,10 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 		spec, note, ok = mapDBInstance(r, res, "AmazonNeptune")
 	case "aws_msk_cluster":
 		spec, note, ok = mapMSK(r, res)
+	case "aws_ec2_transit_gateway":
+		spec, note, ok = mapTGW("TransitGateway-Hours", "transit gateway attachment", r, res), "", true
+	case "aws_ec2_transit_gateway_vpc_attachment":
+		spec, note, ok = mapTGW("TransitGateway-Hours", "TGW VPC attachment", r, res), "", true
 	case "aws_elasticache_replication_group", "aws_elasticache_cluster":
 		spec, note, ok = mapElastiCache(r, res)
 	case "aws_redshift_cluster":
@@ -545,6 +554,21 @@ func mapMSK(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 		},
 		UsageQty: 730, Count: count, Label: fmt.Sprintf("%s × %d brokers", it, count),
 	}, "", true
+}
+
+// mapTGW prices transit gateway attachments via usagetype. Both the
+// gateway and each VPC attachment bill hourly under TransitGateway-Hours
+// (AmazonVPC service in the pricing dataset); data processing is usage-based.
+func mapTGW(usagetype, label string, r *parser.Resource, res *resolver.Resolver) *Spec {
+	_ = r
+	_ = res
+	return &Spec{
+		ServiceCode: "AmazonVPC",
+		Filters: []provider.Filter{
+			tm("usagetype", usagetype),
+		},
+		UsageQty: 730, Count: 1, Label: label,
+	}
 }
 
 func mapElastiCache(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
