@@ -17,23 +17,13 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
 
-// defaultRegion is the single owner of the fallback region used when the
-// directory's tfvars do not set aws_region.
 const defaultRegion = "ap-northeast-2"
 
-// gatedResourceNote marks a resource whose count/for_each resolved to 0:
-// it is not created, so nothing is priced.
 const gatedResourceNote = "count = 0 — resource not created"
 
-// maxModuleDepth bounds module recursion (defensive against symlink
-// loops); real module stacks stay far shallower.
+// maxModuleDepth guards against symlink loops; real stacks are shallower.
 const maxModuleDepth = 5
 
-// analyze parses the Terraform directory and prices every resource,
-// recursively expanding module blocks. The region comes from the root
-// directory's tfvars (aws_region, default ap-northeast-2) and is inherited
-// by module instances. Module outputs referenced by the parent
-// (module.x.out) chain lazily into the child scope.
 func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.CostItem, error) {
 	ds, err := buildDirScope(dir, nil)
 	if err != nil {
@@ -43,15 +33,13 @@ func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.
 	if v, ok := ds.res.VarString("aws_region"); ok {
 		region = v
 	}
-	// Register module scopes BEFORE parent expressions are evaluated;
-	// registration is not evaluation — outputs compute on first reference.
+	// Registration must precede parent evaluation: outputs compute lazily
+	// on first reference, so earlier resolution would miss them.
 	ds.registerModules(dir, region, "", 0)
 	ds.fixpoint()
 	return priceDir(ctx, pricer, ds, region, "")
 }
 
-// dirScope is one directory's fully resolved evaluation scope: the
-// resolver (vars, locals, cross-resource attrs) plus its parsed resources.
 type dirScope struct {
 	res        *resolver.Resolver
 	plain      []*parser.Resource
@@ -62,9 +50,6 @@ type dirScope struct {
 	children   []*moduleInstance
 }
 
-// buildDirScope resolves a directory: resolver construction, parsing, and
-// the locals/cross-resource fixpoint. Module output references cannot
-// resolve yet — callers must registerModules and re-run fixpoint.
 func buildDirScope(dir string, inputs map[string]cty.Value) (*dirScope, error) {
 	res := resolver.NewResolverWithVars(dir, inputs)
 	resources, err := parser.ParseDir(dir)
@@ -98,8 +83,6 @@ func buildDirScope(dir string, inputs map[string]cty.Value) (*dirScope, error) {
 	return ds, nil
 }
 
-// registerModules registers each module block's instance with the scope's
-// resolver so module.m.out references chain lazily into the child scope.
 func (ds *dirScope) registerModules(dir, region, prefix string, depth int) {
 	for _, m := range ds.mods {
 		mi := &moduleInstance{
@@ -111,8 +94,6 @@ func (ds *dirScope) registerModules(dir, region, prefix string, depth int) {
 	}
 }
 
-// fixpoint drives locals / cross-resource resolution to convergence.
-// Re-running after module registration picks up module-output references.
 func (ds *dirScope) fixpoint() {
 	for ds.res.RetryLocals() {
 		ds.rr.Reset()
@@ -120,16 +101,13 @@ func (ds *dirScope) fixpoint() {
 	}
 }
 
-// moduleMetaAttrs are module-block arguments that are not inputs.
 var moduleMetaAttrs = map[string]bool{
 	"source": true, "count": true, "for_each": true, "providers": true, "depends_on": true,
 }
 
-// moduleInstance is one module call, lazily built and memoized: the child
-// scope and its output values are computed once on first demand — either a
-// parent module.m.out reference or the pricing pass — so both share a
-// single evaluation. scope == nil after force means unfetchable or failed;
-// everything degrades to the generic info row.
+// moduleInstance memoizes one module call: output references and the
+// pricing pass share a single evaluation. scope == nil after force means
+// unfetchable.
 type moduleInstance struct {
 	dir, region, prefix string
 	parent              *resolver.Resolver
@@ -141,7 +119,6 @@ type moduleInstance struct {
 	outputs map[string]cty.Value // nil = unavailable (unfetchable/cycle)
 }
 
-// force builds the instance exactly once.
 func (mi *moduleInstance) force() {
 	if mi.built {
 		return
@@ -162,7 +139,7 @@ func (mi *moduleInstance) force() {
 	}
 	ds, err := buildDirScope(modDir, inputs)
 	if err != nil {
-		return // a broken child module must not kill the whole report
+		return // degrade to an info row in priceModule
 	}
 	mi.scope = ds
 	ds.registerModules(modDir, mi.region, mi.prefix, mi.depth+1)
@@ -170,8 +147,6 @@ func (mi *moduleInstance) force() {
 	mi.outputs = evalOutputs(modDir, ds.res)
 }
 
-// sourceDir resolves the module block's source to a local-path or cached
-// registry directory; "" when unfetchable or beyond the depth bound.
 func (mi *moduleInstance) sourceDir() string {
 	if mi.depth >= maxModuleDepth {
 		return ""
@@ -190,16 +165,11 @@ func (mi *moduleInstance) sourceDir() string {
 	return registryModuleDir(mi.m, mi.parent, src)
 }
 
-// outputsFn is the thunk registered on the parent resolver; re-entrant
-// calls (module-output cycles) are cut off by the resolver's running flag.
 func (mi *moduleInstance) outputsFn() map[string]cty.Value {
 	mi.force()
 	return mi.outputs
 }
 
-// evalOutputs evaluates the module directory's output block values in the
-// child scope. Outputs referencing computed attrs or unknown scopes stay
-// out (they are unknown-unknowns for pricing).
 func evalOutputs(dir string, res *resolver.Resolver) map[string]cty.Value {
 	out := map[string]cty.Value{}
 	for name, expr := range parser.ParseOutputs(dir) {
@@ -210,8 +180,6 @@ func evalOutputs(dir string, res *resolver.Resolver) map[string]cty.Value {
 	return out
 }
 
-// priceDir prices one directory's direct resources, then each registered
-// module instance's subtree.
 func priceDir(ctx context.Context, pricer provider.Pricer, ds *dirScope, region, prefix string) ([]output.CostItem, error) {
 	items, err := priceResources(ctx, pricer, ds.plain, ds.res, ds.idx, region, prefix)
 	if err != nil {
@@ -223,9 +191,6 @@ func priceDir(ctx context.Context, pricer provider.Pricer, ds *dirScope, region,
 	return items, nil
 }
 
-// priceModule prices one module instance. A count/for_each of 0 gates the
-// whole instance; an unfetchable or failed source degrades to the generic
-// info row — a fetch problem must never kill the report.
 func priceModule(ctx context.Context, pricer provider.Pricer, mi *moduleInstance) []output.CostItem {
 	addr := strings.TrimSuffix(mi.prefix, ".")
 	if n, note := metaCount(mi.m, mi.parent); n == 0 && note == "" {
@@ -243,8 +208,6 @@ func priceModule(ctx context.Context, pricer provider.Pricer, mi *moduleInstance
 	return items
 }
 
-// localModuleDir resolves a "./" / "../" source to a directory, or ""
-// when the source is remote/registry-shaped.
 func localModuleDir(dir, src string) string {
 	if src == "" || strings.Contains(src, "://") || strings.HasPrefix(src, "git::") {
 		return ""
@@ -259,7 +222,6 @@ func localModuleDir(dir, src string) string {
 	return modDir
 }
 
-// priceResources maps and prices a directory's direct resources.
 func priceResources(ctx context.Context, pricer provider.Pricer, resources []*parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, region, prefix string) ([]output.CostItem, error) {
 	var items []output.CostItem
 	for _, r := range resources {
@@ -329,9 +291,6 @@ func classifyItem(kind mapper.Kind, addr, typ, note string) output.CostItem {
 	}
 }
 
-// metaCount resolves count/for_each to an instance count. A literal
-// count, a for_each over a resolvable map/set, and a resolved numeric
-// count all multiply; anything unresolvable prices as one with a note.
 func metaCount(r *parser.Resource, res *resolver.Resolver) (int, string) {
 	if e, ok := r.Exprs["count"]; ok {
 		if v, ok := res.ResolveExpr(e); ok {
@@ -359,9 +318,6 @@ func metaCount(r *parser.Resource, res *resolver.Resolver) (int, string) {
 	return 1, ""
 }
 
-// registryModuleDir fetches a public-registry module (exact or ~>-pinned
-// version, else latest) into the cache and returns its directory; "" on
-// any failure. A `version` attr of the module block is the pin.
 func registryModuleDir(m *parser.Resource, parent *resolver.Resolver, src string) string {
 	rs := parseRegistrySource(src)
 	if rs == nil {

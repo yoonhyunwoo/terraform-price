@@ -8,16 +8,9 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 )
 
-// rewriteEachValue replaces `each.value.X` traversals with null literals.
-// Inside try(coalesce(each.value.X, var.X), ...) the null is skipped by
-// coalesce, so homogeneous for_each maps (no per-item override) price via
-// the var fallback. Per-item overrides are ignored — an acceptable
-// approximation for cost estimation.
-//
-// Notes: mutates the shared parser AST in place — safe because idempotent
-// (a null literal never re-rewrites). each.key is deliberately NOT rewritten;
-// identifier interpolations like "${var.name}-${each.key}" stay unresolved
-// (known-unknown, affects labels only).
+// rewriteEachValue replaces each.value.X with null so coalesce/try fall
+// through to var fallbacks; per-item overrides are ignored (labels only).
+// Mutates the AST in place — safe because a null literal never re-rewrites.
 func rewriteEachValue(expr hclsyntax.Expression) hclsyntax.Expression {
 	switch e := expr.(type) {
 	case *hclsyntax.ScopeTraversalExpr:

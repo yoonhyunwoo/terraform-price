@@ -2,17 +2,14 @@ package parser
 
 import "github.com/hashicorp/hcl/v2"
 
-// scopeRoots are Terraform traversal roots that name a language scope,
-// never a resource type. Single source of truth for "is this root a
-// resource reference?" — resolver, refres, and mapper all ask it.
+// scopeRoots name language scopes, never resource types.
 var scopeRoots = map[string]bool{
 	"var": true, "local": true, "data": true, "module": true,
 	"terraform": true, "path": true, "cwd": true, "each": true,
 	"count": true, "self": true,
 }
 
-// IsScopeRoot reports whether a traversal root names a language scope
-// (var, local, data, ...) rather than a resource type.
+// IsScopeRoot reports whether a traversal root names a scope, not a resource.
 func IsScopeRoot(name string) bool { return scopeRoots[name] }
 
 // RootName returns the root keyword of a traversal ("var" in var.x.y).
@@ -26,10 +23,8 @@ func RootName(t hcl.Traversal) (string, bool) {
 	return "", false
 }
 
-// SplitRef splits a resource traversal like aws_instance.a.instance_type
-// into the referenced resource address ("aws_instance.a") and the
-// remaining steps. ok=false for scope roots (var.foo, local.bar,
-// each.value, ...) and malformed traversals.
+// SplitRef splits aws_instance.a.attr into ("aws_instance.a", rest);
+// ok=false for scope roots and malformed traversals.
 func SplitRef(t hcl.Traversal) (addr string, rest []hcl.Traverser, ok bool) {
 	if len(t) < 2 {
 		return "", nil, false

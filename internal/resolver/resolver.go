@@ -23,10 +23,6 @@ type Resolver struct {
 	modules     map[string]*moduleEntry
 }
 
-// moduleEntry is a lazily evaluated module-instance output set: the
-// registered thunk computes it once on first demand; a re-entrant call
-// while running (a module-output reference cycle) reports unavailable so
-// the referencing expression degrades to unresolved instead of looping.
 type moduleEntry struct {
 	fn      func() map[string]cty.Value
 	vals    map[string]cty.Value
@@ -34,9 +30,8 @@ type moduleEntry struct {
 	running bool
 }
 
-// RegisterModule registers a module instance's output thunk so parent
-// expressions can resolve module.<name>.<output> references. Registering
-// is not evaluating — the thunk runs on first reference and is memoized.
+// RegisterModule registers a lazily evaluated output thunk for
+// module.<name>.<output> references; first reference forces and memoizes it.
 func (r *Resolver) RegisterModule(name string, outputs func() map[string]cty.Value) {
 	if r.modules == nil {
 		r.modules = map[string]*moduleEntry{}
@@ -44,9 +39,6 @@ func (r *Resolver) RegisterModule(name string, outputs func() map[string]cty.Val
 	r.modules[name] = &moduleEntry{fn: outputs}
 }
 
-// moduleOutputs returns a registered module instance's output values,
-// forcing the thunk once. nil outputs (unfetchable module) report
-// unavailable.
 func (r *Resolver) moduleOutputs(name string) (map[string]cty.Value, bool) {
 	e, ok := r.modules[name]
 	if !ok {
@@ -72,10 +64,8 @@ func NewResolver(dir string) *Resolver {
 	return NewResolverWithVars(dir, nil)
 }
 
-// NewResolverWithVars builds a resolver with externally supplied variable
-// values (module inputs) layered on top of the directory's own tfvars —
-// module instantiation. Inputs win over tfvars, and the child's variable
-// defaults still backstop anything unset.
+// NewResolverWithVars layers module-call input values over the directory's
+// tfvars; the child's variable defaults backstop unset inputs.
 func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 	r := &Resolver{vars: map[string]cty.Value{}, locals: map[string]cty.Value{}}
 	parser := hclparse.NewParser()
@@ -98,16 +88,11 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 		}
 	}
 
-	// Module inputs layer on top of the directory's tfvars — a module
-	// instance's caller-supplied values win for that instantiation.
 	for k, v := range inputs {
 		r.vars[k] = v
 	}
 
-	// Variables with defaults first — locals reference them.
 	r.loadVarDefaults(dir)
-	// Collect locals blocks from ALL .tf files (not just locals.tf) —
-	// real repos spread locals across many files.
 	r.pendingLocs = map[string]hcl.Expression{}
 	entries, err := os.ReadDir(dir)
 	if err == nil {
@@ -134,18 +119,12 @@ func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 			}
 		}
 	}
-	// Iterative fixpoint: locals can reference other locals across files.
-	// Locals referencing resources stay pending until SetResources +
-	// RetryLocals (analyze iterates both to a fixpoint).
 	for r.RetryLocals() {
-		// iterate: a pass may unlock locals that referenced other locals
-		// resolved later in the same pass (map order is random)
 	}
 	return r
 }
 
-// RetryLocals re-attempts pending locals (e.g. those referencing resources
-// after SetResources). Returns true if any new local resolved.
+// RetryLocals re-attempts pending locals; true when any new local resolved.
 func (r *Resolver) RetryLocals() bool {
 	changed := false
 	for name, expr := range r.pendingLocs {
@@ -158,8 +137,6 @@ func (r *Resolver) RetryLocals() bool {
 	return changed
 }
 
-// loadVarDefaults reads variable blocks' default values so unset vars
-// fall back to their declared defaults (common in real repos).
 func (r *Resolver) loadVarDefaults(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -207,8 +184,6 @@ func (r *Resolver) VarString(name string) (string, bool) {
 	return Str(r.vars[name])
 }
 
-// scope returns the evaluation context with var/local objects and the
-// standard function table (toset, length, concat, ...).
 func (r *Resolver) scope() *hcl.EvalContext {
 	ctx := funcs.Scope(r.vars, r.locals)
 	if r.resScope != nil {
@@ -216,8 +191,7 @@ func (r *Resolver) scope() *hcl.EvalContext {
 			ctx.Variables[t] = v
 		}
 	}
-	// Expose registered module outputs as a `module` object so references
-	// nested in templates/functions ("${module.m.out}-x") evaluate too.
+	// A `module` object makes template-nested refs ("${module.m.out}-x") work.
 	if len(r.modules) > 0 {
 		mods := make(map[string]cty.Value, len(r.modules))
 		for name := range r.modules {
@@ -232,8 +206,7 @@ func (r *Resolver) scope() *hcl.EvalContext {
 	return ctx
 }
 
-// ResolveExpr evaluates an expression with the full scope: var/local
-// references, indexing, and function calls.
+// ResolveExpr evaluates an expression against vars, locals, and resources.
 func (r *Resolver) ResolveExpr(expr hcl.Expression) (cty.Value, bool) {
 	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
 		return r.resolveTraversal(hcl.Traversal(ste.Traversal))
@@ -258,8 +231,6 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 	case "local":
 		return navigate(t[1:], cty.ObjectVal(r.locals))
 	case "module":
-		// Chained scope: delegate into a registered module instance's
-		// lazily computed outputs (module.m.output).
 		if len(t) >= 2 {
 			if name, ok := t[1].(hcl.TraverseAttr); ok {
 				if outs, ok := r.moduleOutputs(name.Name); ok {
@@ -270,12 +241,9 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 		return cty.NilVal, false
 	}
 	if parser.IsScopeRoot(root) {
-		// Known-unknowns, unresolved by design and reported as such —
-		// never guessed: provider-computed attrs (id/arn/latest_version),
-		// data.*, each.key, self.
+		// Known-unknowns by design: computed attrs, data.*, each.key, self.
 		return cty.NilVal, false
 	}
-	// Resource reference: aws_instance.a.instance_type
 	if addr, rest, ok := parser.SplitRef(t); ok {
 		typ, name, _ := parser.SplitAddr(addr)
 		return r.resolveResourceTraversal(typ, name, rest)
@@ -291,9 +259,8 @@ func (r *Resolver) resolveResourceTraversal(root string, name string, rest []hcl
 	if !ok {
 		return cty.NilVal, false
 	}
-	// Parser stores nested-block attrs as flat dotted keys
-	// (root_block_device.volume_type). Explode into a nested object so
-	// .root_block_device[0].volume_type navigates naturally.
+	// Parser stores nested-block attrs flat (root_block_device.volume_type);
+	// explode so indexed navigation works.
 	obj := cty.ObjectVal(explodeAttrs(attrs))
 	// Drop numeric index steps: resource[0] on a count-based resource (and
 	// single-occurrence nested blocks) carry the same config attrs at any
@@ -308,7 +275,6 @@ func (r *Resolver) resolveResourceTraversal(root string, name string, rest []hcl
 	return navigate(filtered, obj)
 }
 
-// explodeAttrs converts {"a.b": v} into {"a": {"b": v}} recursively.
 func explodeAttrs(flat map[string]cty.Value) map[string]cty.Value {
 	out := map[string]cty.Value{}
 	for k, v := range flat {
@@ -318,7 +284,6 @@ func explodeAttrs(flat map[string]cty.Value) map[string]cty.Value {
 			continue
 		}
 		if sub, ok := out[parts[0]]; ok && sub.Type().IsObjectType() {
-			// merge into existing nested object
 			merged := sub.AsValueMap()
 			nested := explodeNested(parts[1], v)
 			for nk, nv := range nested {
@@ -395,9 +360,8 @@ func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 	return val, true
 }
 
-// SetResources registers resolved resource attributes and builds the
-// resource TYPE-rooted evaluation scope (aws_launch_template = {this = {...}})
-// so expressions like one(aws_launch_template.default[*].id) evaluate natively.
+// SetResources registers resolved attrs and builds the resource-type scope
+// (aws_launch_template.default[*].id evaluates natively).
 func (r *Resolver) SetResources(resources map[string]map[string]cty.Value, countBased map[string]bool) {
 	r.resources = resources
 	byType := map[string]map[string]cty.Value{}
@@ -434,16 +398,14 @@ func (r *Resolver) ResolveLocal(name string) (cty.Value, bool) {
 	return v, true
 }
 
-// ValueMaps exposes the resolved var and local values so callers building
-// their own EvalContext (e.g. refres resource-expression evaluation) can
-// seed it with the same base scope.
+// ValueMaps exposes resolved vars and locals for callers building their
+// own EvalContext (e.g. refres).
 func (r *Resolver) ValueMaps() (vars, locals map[string]cty.Value) {
 	return r.vars, r.locals
 }
 
-// LocalExpr returns the unevaluated expression of a local that has not
-// resolved (typically because it references computed resource attrs).
-// Used for transitive resource discovery without value resolution.
+// LocalExpr returns a pending local's unevaluated expression for
+// transitive resource discovery.
 func (r *Resolver) LocalExpr(name string) (hcl.Expression, bool) {
 	e, ok := r.pendingLocs[name]
 	return e, ok

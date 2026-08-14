@@ -15,20 +15,12 @@ import (
 	"time"
 )
 
-// Public registry modules are open-source: fetch the published tarball and
-// expand them exactly like local-path modules. The registry's download
-// endpoint (204 + X-Terraform-Get) points at a git source; GitHub sources
-// translate to codeload tarballs. Everything degrades to the generic info
-// row on failure — a fetch problem must never kill the report.
-
 var (
 	registryBase = "https://registry.terraform.io"
 	codeloadBase = "https://codeload.github.com"
 	fetchClient  = &http.Client{Timeout: 20 * time.Second}
 )
 
-// registrySource is a parsed public-registry module source:
-// namespace/name/provider[//subdir].
 type registrySource struct {
 	namespace, name, provider string
 	subdir                    string
@@ -36,8 +28,6 @@ type registrySource struct {
 
 var registrySrcRe = regexp.MustCompile(`^([a-z0-9][a-z0-9-]*)/([a-z0-9][a-z0-9-]*)/([a-z0-9][a-z0-9-]*)(//.*)?$`)
 
-// parseRegistrySource recognizes `<ns>/<name>/<provider>` sources.
-// Local paths (./ ../), URLs, and git:: sources return nil.
 func parseRegistrySource(src string) *registrySource {
 	src = strings.SplitN(src, "?", 2)[0]
 	m := registrySrcRe.FindStringSubmatch(src)
@@ -47,9 +37,6 @@ func parseRegistrySource(src string) *registrySource {
 	return &registrySource{namespace: m[1], name: m[2], provider: m[3], subdir: strings.TrimPrefix(m[4], "//")}
 }
 
-// resolveVersion picks the version to download: an exact pin as-is, else
-// the highest version satisfying a "~> x.y" / "~> x" constraint, else the
-// highest published. Pre-releases are skipped.
 func resolveVersion(rs *registrySource, pin string) (string, error) {
 	if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+$`, pin); ok {
 		return pin, nil
@@ -115,8 +102,7 @@ func satisfiesPessimistic(want, got []string) bool {
 	return numAtLeast(got[len(want)-1], want[len(want)-1])
 }
 
-// numAtLeast compares two numeric strings by value (versions are
-// numeric components; pad to equal length so "9" < "10" holds).
+// numAtLeast compares numeric strings by value; padding makes "9" < "10".
 func numAtLeast(a, b string) bool {
 	for len(a) < len(b) {
 		a = "0" + a
@@ -127,7 +113,6 @@ func numAtLeast(a, b string) bool {
 	return a >= b
 }
 
-// versionLess compares dotted numeric versions.
 func versionLess(a, b string) bool {
 	as, bs := strings.Split(a, "."), strings.Split(b, ".")
 	for i := range min(len(as), len(bs)) {
@@ -138,9 +123,6 @@ func versionLess(a, b string) bool {
 	return len(as) < len(bs)
 }
 
-// tarballURL turns the registry's X-Terraform-Get location into a
-// downloadable tarball URL. GitHub git sources map to codeload; direct
-// tarball URLs pass through.
 func tarballURL(get string) (string, error) {
 	if ref := strings.TrimPrefix(get, "git::https://github.com/"); ref != get {
 		repo, sha, ok := strings.Cut(strings.TrimPrefix(ref, ""), "?ref=")
@@ -155,9 +137,6 @@ func tarballURL(get string) (string, error) {
 	return "", fmt.Errorf("unsupported module source: %s", get)
 }
 
-// fetchRegistryModule downloads and extracts a registry module into the
-// user cache, returning the directory (root + subdir). ok=false means
-// unavailable — the caller degrades to an info row.
 func fetchRegistryModule(rs *registrySource, version string) (string, bool) {
 	cacheRoot, err := moduleCacheDir()
 	if err != nil {
@@ -197,8 +176,6 @@ func fetchRegistryModule(rs *registrySource, version string) (string, bool) {
 	return filepath.Join(dir, rs.subdir), true
 }
 
-// extractTarGz unpacks a tar.gz stream into dst, stripping the leading
-// archive directory and refusing path escapes.
 func extractTarGz(r io.Reader, dst string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {

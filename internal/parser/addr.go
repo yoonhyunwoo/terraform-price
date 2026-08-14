@@ -5,7 +5,7 @@ import "strings"
 // Addr returns the Terraform address "type.name".
 func (r *Resource) Addr() string { return r.Type + "." + r.Name }
 
-// Index maps resources by address ("aws_instance.a" -> resource).
+// Index maps resources by address.
 func Index(resources []*Resource) map[string]*Resource {
 	idx := make(map[string]*Resource, len(resources))
 	for _, r := range resources {
@@ -14,8 +14,7 @@ func Index(resources []*Resource) map[string]*Resource {
 	return idx
 }
 
-// SplitAddr splits a resource address "type.name" into its parts.
-// ok=false when the address has no "." separator.
+// SplitAddr splits "type.name"; ok=false without a separator.
 func SplitAddr(addr string) (typ, name string, ok bool) {
 	typ, name, found := strings.Cut(addr, ".")
 	return typ, name, found

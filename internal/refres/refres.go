@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Package refres resolves cross-resource references (aws_instance.a.instance_type)
-// using the verify-before-resolve pattern: cycle detection at registration,
-// lazy memoized resolution at lookup.
+// Package refres resolves cross-resource references with cycle detection
+// up front (Verify) and lazy memoized resolution at lookup.
 package refres
 
 import (
@@ -37,8 +36,7 @@ func New(resources []*parser.Resource, res *resolver.Resolver) *RefResolver {
 	}
 }
 
-// Verify checks the reference graph is acyclic. Returns an error with the
-// full cycle path (e.g. "aws_a.x -> aws_b.y -> aws_a.x").
+// Verify reports reference cycles with the full path (aws_a.x -> aws_b.y -> aws_a.x).
 func (r *RefResolver) Verify() error {
 	visited := make(map[string]bool)
 	var check func(addr string, path []string) error
@@ -70,10 +68,9 @@ func (r *RefResolver) Verify() error {
 	return nil
 }
 
-// deps returns addresses referenced by the resource's expressions.
-// Uses expr.Variables() so refs nested in try()/coalesce()/conditionals/
-// templates count as edges — a cycle hidden behind a try() fallback would
-// otherwise price both sides with the fallback value (silent wrong answer).
+// deps uses expr.Variables() so refs hidden in try()/coalesce()/templates
+// count as edges — otherwise a cycle behind a try() fallback would silently
+// price both sides with the fallback value.
 func (r *RefResolver) deps(addr string) []string {
 	res, ok := r.resources[addr]
 	if !ok {
@@ -102,8 +99,7 @@ func addrsInExpr(expr hcl.Expression) []string {
 	return out
 }
 
-// ResolveAttr resolves an attribute of a resource, following references.
-// addr is "type.name", attr is the attribute key (e.g. "instance_type").
+// ResolveAttr resolves one attribute of "type.name", following references.
 func (r *RefResolver) ResolveAttr(addr, attr string) (cty.Value, bool) {
 	attrs := r.ResolveResource(addr)
 	if attrs == nil {
@@ -116,8 +112,7 @@ func (r *RefResolver) ResolveAttr(addr, attr string) (cty.Value, bool) {
 	return v, true
 }
 
-// ResolveResource resolves all attributes of a resource, following
-// references recursively. Results are memoized.
+// ResolveResource resolves all attributes of a resource, memoized.
 func (r *RefResolver) ResolveResource(addr string) map[string]cty.Value {
 	if attrs, ok := r.resolved[addr]; ok {
 		return attrs
@@ -142,10 +137,8 @@ func (r *RefResolver) ResolveResource(addr string) map[string]cty.Value {
 	return attrs
 }
 
-// resolveExpr evaluates an expression. Direct scope traversals to other
-// resources are resolved recursively; any other expression (function call,
-// ternary, template, splat) is evaluated against a scope that includes the
-// resource objects it references.
+// resolveExpr resolves direct resource traversals recursively; everything
+// else evaluates against a scope holding the referenced resource objects.
 func (r *RefResolver) resolveExpr(expr hcl.Expression, fromAddr string) (cty.Value, bool) {
 	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
 		t := hcl.Traversal(ste.Traversal)
@@ -160,8 +153,6 @@ func (r *RefResolver) resolveExpr(expr hcl.Expression, fromAddr string) (cty.Val
 			return navigateAttrs(targetAttrs, rest)
 		}
 	}
-	// Non-traversal expression: build a scope with var/local values plus
-	// on-demand resolved resource objects, then let HCL evaluate it.
 	vars, locals := r.res.ValueMaps()
 	ctx := funcs.Scope(vars, locals)
 	need := map[string]map[string]cty.Value{}
@@ -188,9 +179,8 @@ func (r *RefResolver) resolveExpr(expr hcl.Expression, fromAddr string) (cty.Val
 	return cty.NilVal, false
 }
 
-// navigateAttrs walks the remaining traversal steps over a resolved attrs map.
-// A numeric [0] on the object itself is count=1 semantics and resolves to the
-// whole object.
+// navigateAttrs walks traversal steps over an attrs map; [0] on the object
+// itself is count=1 semantics and yields the whole object.
 func navigateAttrs(attrs map[string]cty.Value, steps []hcl.Traverser) (cty.Value, bool) {
 	var val cty.Value
 	started := false
@@ -265,8 +255,7 @@ func (r *RefResolver) AllResolved() map[string]map[string]cty.Value {
 	return r.resolved
 }
 
-// Reset clears the resolution cache so resources re-resolve with the
-// resolver's updated scope (e.g. after RetryLocals).
+// Reset clears the memo table so resources re-resolve against an updated scope.
 func (r *RefResolver) Reset() {
 	r.resolved = make(map[string]map[string]cty.Value)
 }

@@ -74,10 +74,8 @@ func collectExprs(body *hclsyntax.Body, prefix string, out map[string]hcl.Expres
 			bkey = prefix + "." + blk.Type
 		}
 		if blk.Type == "dynamic" && len(blk.Labels) == 1 {
-			// dynamic "launch_template" { content { id = ... } } — the
-			// content attrs are what a plain launch_template block would
-			// carry. Register them under launch_template.* as well so
-			// mapper probes (launch_template.id) hit.
+			// dynamic "x" { content { ... } }: register content attrs
+			// under x.* so mapper probes hit.
 			for _, inner := range blk.Body.Blocks {
 				if inner.Type != "content" {
 					continue
@@ -93,9 +91,7 @@ func collectExprs(body *hclsyntax.Body, prefix string, out map[string]hcl.Expres
 	}
 }
 
-// ParseOutputs reads each output block's value expression from a
-// directory's .tf files: output name -> value expr. Non-value attributes
-// (description, sensitive) and nested blocks are ignored.
+// ParseOutputs maps output block names to their value expressions.
 func ParseOutputs(dir string) map[string]hcl.Expression {
 	out := map[string]hcl.Expression{}
 	parser := hclparse.NewParser()

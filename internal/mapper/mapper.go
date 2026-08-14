@@ -779,13 +779,10 @@ func elasticacheEngine(e string) string {
 	return "Redis"
 }
 
-// resolveResourceRef finds the resource an expression ultimately references,
-// following unresolved locals transitively. This handles the pattern
+// resolveResourceRef follows unresolved locals transitively to the target
+// resource when only the referenced VALUE is computed:
 //
-//	launch_template { id = local.lt_block.id }
-//	locals { lt_block = { id = one(aws_launch_template.default[*].id) } }
-//
-// where the id VALUE is computed but the TARGET resource is discoverable.
+//	launch_template { id = local.lt_block.id }  →  aws_launch_template.default
 func resolveResourceRef(expr hcl.Expression, res *resolver.Resolver, idx map[string]*parser.Resource) *parser.Resource {
 	return chaseResourceRef(expr, res, idx, map[string]bool{})
 }

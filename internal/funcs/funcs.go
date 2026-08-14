@@ -181,7 +181,6 @@ var lookupFunc = function.New(&function.Spec{
 // Core returns the function table for expression evaluation.
 func Core() map[string]function.Function {
 	return map[string]function.Function{
-		// Collections
 		"length":       lengthFunc,
 		"tolist":       toListFunc,
 		"toset":        toSetFunc,
@@ -206,7 +205,6 @@ func Core() map[string]function.Function {
 		"setintersect": stdlib.SetIntersectionFunc,
 		"setsubtract":  stdlib.SetSubtractFunc,
 
-		// Strings
 		"join":       stdlib.JoinFunc,
 		"split":      stdlib.SplitFunc,
 		"lower":      stdlib.LowerFunc,
@@ -224,7 +222,6 @@ func Core() map[string]function.Function {
 		"indent":     stdlib.IndentFunc,
 		"title":      stdlib.TitleFunc,
 
-		// Numbers
 		"abs":    stdlib.AbsoluteFunc,
 		"ceil":   stdlib.CeilFunc,
 		"floor":  stdlib.FloorFunc,
@@ -234,11 +231,9 @@ func Core() map[string]function.Function {
 		"pow":    stdlib.PowFunc,
 		"signum": stdlib.SignumFunc,
 
-		// Encoding
 		"jsonencode": stdlib.JSONEncodeFunc,
 		"jsondecode": stdlib.JSONDecodeFunc,
 
-		// General
 		"coalesce":     stdlib.CoalesceFunc,
 		"coalescelist": stdlib.CoalesceListFunc,
 		"compact":      stdlib.CompactFunc,
@@ -248,7 +243,6 @@ func Core() map[string]function.Function {
 	}
 }
 
-// Add is a helper for sum.
 var Add = stdlib.Add
 
 // Scope builds an EvalContext with var/local objects and the function table.
@@ -265,5 +259,3 @@ func Scope(vars, locals map[string]cty.Value) *hcl.EvalContext {
 	}
 	return ctx
 }
-
-// Ensure gocty is imported for potential future use.
