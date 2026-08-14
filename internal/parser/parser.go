@@ -13,7 +13,6 @@ import (
 type Resource struct {
 	Type  string
 	Name  string
-	File  string
 	Exprs map[string]hcl.Expression
 }
 
@@ -43,13 +42,13 @@ func ParseDir(dir string) ([]*Resource, error) {
 				exprs := map[string]hcl.Expression{}
 				collectExprs(blk.Body, "", exprs)
 				resources = append(resources, &Resource{
-					Type: blk.Labels[0], Name: blk.Labels[1], File: e.Name(), Exprs: exprs,
+					Type: blk.Labels[0], Name: blk.Labels[1], Exprs: exprs,
 				})
 				continue
 			}
 			if blk.Type == "module" && len(blk.Labels) == 1 {
 				resources = append(resources, &Resource{
-					Type: "module", Name: blk.Labels[0], File: e.Name(),
+					Type: "module", Name: blk.Labels[0],
 				})
 			}
 		}
