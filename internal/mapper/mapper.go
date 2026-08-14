@@ -49,7 +49,6 @@ var infoTypes = map[string]string{
 	"aws_docdb_cluster":           "DocumentDB cluster — instance cost is priced via aws_docdb_cluster_instance",
 	"aws_neptune_cluster":         "Neptune cluster — instance cost is priced via aws_neptune_cluster_instance",
 	"aws_vpc_endpoint":            "VPC endpoint — per-service hourly (not priced yet)",
-	"aws_vpn_connection":          "VPN connection — hourly (usagetype unsupported)",
 	"aws_kms_key":                 "KMS key — $1/month flat (Price List unit needs live confirmation)",
 	"aws_route53_zone":            "Route53 hosted zone — $0.50/month global (price needs live confirmation)",
 	"module":                      "module block — contents not parsed, resources inside are not estimated",
@@ -259,6 +258,10 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 		spec, note, ok = mapDBInstance(r, res, "AmazonNeptune")
 	case "aws_msk_cluster":
 		spec, note, ok = mapMSK(r, res)
+	case "aws_eks_cluster":
+		spec, note, ok = mapEKSCluster(r, res), "", true
+	case "aws_vpn_connection":
+		spec, note, ok = mapVPNConnection(r, res), "", true
 	case "aws_ec2_transit_gateway_vpc_attachment":
 		spec, note, ok = mapTGW("TransitGateway-Hours", "TGW VPC attachment", r, res), "", true
 	case "aws_elasticache_replication_group", "aws_elasticache_cluster":
@@ -567,6 +570,31 @@ func mapTGW(usagetype, label string, r *parser.Resource, res *resolver.Resolver)
 			tm("usagetype", usagetype),
 		},
 		UsageQty: 730, Count: 1, Label: label,
+	}
+}
+
+// mapEKSCluster prices the EKS control plane hourly fee. EKS Auto Mode
+// instance management and extended support bill under separate
+// usagetypes and are not modeled.
+func mapEKSCluster(r *parser.Resource, res *resolver.Resolver) *Spec {
+	_ = r
+	_ = res
+	return &Spec{
+		ServiceCode: "AmazonEKS",
+		Filters:     []provider.Filter{tm("usagetype", "AmazonEKS-Hours:perCluster")},
+		UsageQty:    730, Count: 1, Label: "EKS control plane",
+	}
+}
+
+// mapVPNConnection prices site-to-site VPN connections (hourly per
+// connection; data transfer billed separately).
+func mapVPNConnection(r *parser.Resource, res *resolver.Resolver) *Spec {
+	_ = r
+	_ = res
+	return &Spec{
+		ServiceCode: "AmazonVPC",
+		Filters:     []provider.Filter{tm("usagetype", "VPN-Usage-Hours:ipsec.1")},
+		UsageQty:    730, Count: 1, Label: "VPN connection",
 	}
 }
 
