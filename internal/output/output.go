@@ -34,6 +34,57 @@ type CostItem struct {
 	Rates      []RateLine
 }
 
+// mdTable accumulates cells and renders once. Escaping pipes/newlines and
+// clamping cell count to the headers happen only here — the single
+// structure→bytes boundary (kubectl printTable clamps arity, go-pretty
+// RenderMarkdown escapes cells); callers can never break the table with
+// free-form Terraform strings.
+type mdTable struct {
+	headers []string
+	aligns  []string
+	rows    [][]string
+}
+
+func newMdTable(headers, aligns []string) *mdTable {
+	return &mdTable{headers: headers, aligns: aligns}
+}
+
+func (t *mdTable) row(cells ...string) {
+	if len(cells) > len(t.headers) {
+		cells = cells[:len(t.headers)]
+	}
+	t.rows = append(t.rows, cells)
+}
+
+func mdEscapeCell(s string) string {
+	s = strings.ReplaceAll(s, "|", `\|`)
+	s = strings.ReplaceAll(s, "\n", "<br/>")
+	return s
+}
+
+func (t *mdTable) render(w io.Writer) {
+	writeRow(w, t.headers)
+	fmt.Fprintf(w, "|%s|\n", strings.Join(t.aligns, "|"))
+	for _, r := range t.rows {
+		for i := range r {
+			r[i] = mdEscapeCell(r[i])
+		}
+		writeRow(w, r)
+	}
+}
+
+func writeRow(w io.Writer, cells []string) {
+	fmt.Fprint(w, "|")
+	for _, c := range cells {
+		if c == "" {
+			fmt.Fprint(w, " |")
+		} else {
+			fmt.Fprintf(w, " %s |", c)
+		}
+	}
+	fmt.Fprintln(w)
+}
+
 func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
 	var fixed, variable, unsupported, free []CostItem
 	for _, it := range items {
@@ -56,22 +107,28 @@ func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
 	}
 
 	fmt.Fprintln(w, "## Fixed")
-	fmt.Fprintln(w, "| Resource | Spec | Unit price (USD) | Unit | Monthly (USD) |")
-	fmt.Fprintln(w, "|---|---|---:|---|---:|")
+	fixedT := newMdTable(
+		[]string{"Resource", "Spec", "Unit price (USD)", "Unit", "Monthly (USD)"},
+		[]string{"---", "---", "---:", "---", "---:"},
+	)
 	for _, it := range fixed {
 		if it.Unresolved != "" {
-			fmt.Fprintf(w, "| `%s` | — | — | — | %s |\n", it.Addr, it.Unresolved)
+			fixedT.row("`"+it.Addr+"`", "—", "—", "—", it.Unresolved)
 			continue
 		}
 		total += it.Monthly
-		fmt.Fprintf(w, "| `%s` | %s | %.4f | %s | %.2f |\n", it.Addr, it.Spec, it.UnitPrice, it.Unit, it.Monthly)
+		fixedT.row("`"+it.Addr+"`", it.Spec, fmt.Sprintf("%.4f", it.UnitPrice), it.Unit, fmt.Sprintf("%.2f", it.Monthly))
 	}
-	fmt.Fprintf(w, "| **Fixed total / month** | | | | **%.2f** |\n\n", total)
+	fixedT.row("**Fixed total / month**", "", "", "", "**"+fmt.Sprintf("%.2f", total)+"**")
+	fixedT.render(w)
+	fmt.Fprintln(w)
 
 	if len(variable) > 0 {
 		fmt.Fprintln(w, "## Variable")
-		fmt.Fprintln(w, "| Resource | Type | Unit price (USD) | Notes |")
-		fmt.Fprintln(w, "|---|---|---|---|")
+		varT := newMdTable(
+			[]string{"Resource", "Type", "Unit price (USD)", "Notes"},
+			[]string{"---", "---", "---", "---"},
+		)
 		for _, it := range variable {
 			rate := "—"
 			if len(it.Rates) > 0 {
@@ -81,28 +138,35 @@ func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
 				}
 				rate = strings.Join(parts, " · ")
 			}
-			fmt.Fprintf(w, "| `%s` | %s | %s | %s |\n", it.Addr, it.Type, rate, it.Note)
+			varT.row("`"+it.Addr+"`", it.Type, rate, it.Note)
 		}
+		varT.render(w)
 		fmt.Fprintln(w)
 	}
 
 	if len(unsupported) > 0 {
 		fmt.Fprintf(w, "## Unsupported\n\n")
-		fmt.Fprintln(w, "| Resource | Type | Notes |")
-		fmt.Fprintln(w, "|---|---|---|")
+		unsT := newMdTable(
+			[]string{"Resource", "Type", "Notes"},
+			[]string{"---", "---", "---"},
+		)
 		for _, it := range unsupported {
-			fmt.Fprintf(w, "| `%s` | %s | %s |\n", it.Addr, it.Type, it.Note)
+			unsT.row("`"+it.Addr+"`", it.Type, it.Note)
 		}
+		unsT.render(w)
 		fmt.Fprintln(w)
 	}
 
 	if len(free) > 0 {
 		fmt.Fprintf(w, "## Free\n\n")
-		fmt.Fprintln(w, "| Resource | Type |")
-		fmt.Fprintln(w, "|---|---|")
+		freeT := newMdTable(
+			[]string{"Resource", "Type"},
+			[]string{"---", "---"},
+		)
 		for _, it := range free {
-			fmt.Fprintf(w, "| `%s` | %s |\n", it.Addr, it.Type)
+			freeT.row("`"+it.Addr+"`", it.Type)
 		}
+		freeT.render(w)
 		fmt.Fprintln(w)
 	}
 }

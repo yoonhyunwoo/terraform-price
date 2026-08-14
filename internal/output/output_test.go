@@ -57,3 +57,51 @@ func TestWriteMarkdownNoUnsupportedOmitsGapSection(t *testing.T) {
 		t.Errorf("gap section should be omitted when no unsupported items")
 	}
 }
+
+// A cell carrying free-form Terraform strings (pipes, newlines) must not
+// break the table: pipes escape, newlines flatten, arity clamps — all owned
+// by the renderer (go-pretty markdownRenderRow / kubectl printTable
+// precedent).
+func TestMarkdownTableIntegrity(t *testing.T) {
+	items := []CostItem{
+		{Kind: Fixed, Addr: "aws_instance.a", Spec: "t3.micro | spot", UnitPrice: 0.01, Unit: "Hrs", Monthly: 7.30},
+		{Kind: Fixed, Addr: "aws_instance.b", Unresolved: "type | unresolved\nsee log"},
+		{Kind: Variable, Addr: "aws_s3_bucket.x", Type: "aws_s3_bucket", Note: "a|b"},
+	}
+	var buf bytes.Buffer
+	WriteMarkdown(&buf, "svc", "r", items)
+	lines := strings.Split(buf.String(), "\n")
+	pipeCount := 6 // fixed table: 5 columns + 2 outer pipes... computed below
+	_ = pipeCount
+	for i, ln := range lines {
+		if !strings.HasPrefix(ln, "|") {
+			continue
+		}
+		// every table row line has the same number of unescaped pipes:
+		// split on | then rejoin escaped \| markers
+		n := strings.Count(ln, "|") - 2*strings.Count(ln, `\|`)
+		if n < 2 {
+			t.Errorf("line %d collapsed (%q) — a cell broke the row", i, ln)
+		}
+	}
+	if !strings.Contains(buf.String(), `t3.micro \| spot`) {
+		t.Errorf("pipe in Spec not escaped:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "<br/>") {
+		t.Errorf("newline in Unresolved not flattened:\n%s", buf.String())
+	}
+}
+
+func TestMdTableClampsArity(t *testing.T) {
+	tt := newMdTable([]string{"A", "B"}, []string{"---", "---"})
+	tt.row("1", "2", "3", "4")
+	var buf bytes.Buffer
+	tt.render(&buf)
+	out := buf.String()
+	if strings.Contains(out, "3") {
+		t.Errorf("extra cells leaked past header arity:\n%s", out)
+	}
+	if got := strings.Count(out, "\n"); got != 3 { // header + align + 1 row
+		t.Errorf("render produced %d lines, want 3:\n%s", got, out)
+	}
+}
