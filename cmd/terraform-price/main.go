@@ -31,7 +31,7 @@ func main() {
 
 	region, _ := res.VarString("aws_region")
 	if region == "" {
-		region = "ap-northeast-2"
+		region = defaultRegion
 	}
 	service, _ := res.VarString("origin_service_name")
 	if service == "" {

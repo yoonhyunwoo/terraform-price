@@ -14,6 +14,10 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
+// defaultRegion is the single owner of the fallback region used when the
+// directory's tfvars do not set aws_region.
+const defaultRegion = "ap-northeast-2"
+
 // analyze parses the Terraform directory and prices every resource,
 // producing the cost items for the report. The region comes from the
 // directory's own tfvars (aws_region, default ap-northeast-2).
@@ -21,7 +25,7 @@ func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.
 	res := resolver.NewResolver(dir)
 	region, _ := res.VarString("aws_region")
 	if region == "" {
-		region = "ap-northeast-2"
+		region = defaultRegion
 	}
 	resources, err := parser.ParseDir(dir)
 	if err != nil {
