@@ -18,7 +18,7 @@ func buildPricer(client provider.Pricer, noCache bool, cachePath string) (provid
 	var inner provider.Pricer = client
 	var cacher *provider.Cached
 	if cachePath != "" && !noCache {
-		cacher = provider.NewCached(client, cachePath, provider.CacheTTL)
+		cacher = provider.NewCached(cachePath, inner)
 		inner = cacher
 	}
 	return awsprice.NewComposer(inner), cacher
@@ -28,7 +28,6 @@ func main() {
 	profileFlag := flag.String("profile", "", "AWS profile (default: tfvars account_alias)")
 	noCacheFlag := flag.Bool("no-cache", false, "bypass the AWS Price List API price cache")
 	baselineFlag := flag.String("baseline", "", "baseline directory to diff against (e.g. a checkout of the merge-target branch)")
-	maxDeltaFlag := flag.Float64("max-delta", -1, "exit non-zero when the monthly delta vs baseline exceeds this many USD (requires --baseline)")
 	flag.Parse()
 	dir := "."
 	if flag.NArg() > 0 {
@@ -47,8 +46,7 @@ func main() {
 		profile, _ = res.VarString("account_alias")
 	}
 	if profile == "" {
-		fmt.Fprintln(os.Stderr, "AWS profile not found in tfvars (account_alias); pass --profile <name>.")
-		os.Exit(1)
+		profile = "default"
 	}
 	service, _ := res.VarString("origin_service_name")
 	if service == "" {
@@ -57,14 +55,15 @@ func main() {
 
 	client, err := awsprice.NewClient(ctx, profile)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "aws config:", err)
+		fmt.Fprintln(os.Stderr, "aws:", err)
 		os.Exit(1)
 	}
 
 	cachePath := ""
 	if !*noCacheFlag {
-		if cacheDir, err := os.UserCacheDir(); err == nil && cacheDir != "" {
-			cachePath = filepath.Join(cacheDir, "terraform-price", "prices.json")
+		home, err := os.UserHomeDir()
+		if err == nil {
+			cachePath = filepath.Join(home, ".cache", "terraform-price", "prices.json")
 		}
 	}
 	pricer, cacher := buildPricer(client, *noCacheFlag, cachePath)
@@ -74,14 +73,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "parse:", err)
 		os.Exit(1)
 	}
-	if *maxDeltaFlag >= 0 && *baselineFlag == "" {
-		fmt.Fprintln(os.Stderr, "--max-delta requires --baseline.")
-		os.Exit(1)
-	}
 
 	output.WriteMarkdown(os.Stdout, service, region, items)
 
-	exitCode := 0
 	if *baselineFlag != "" {
 		baseItems, err := analyze(ctx, pricer, *baselineFlag)
 		if err != nil {
@@ -90,18 +84,11 @@ func main() {
 		}
 		rows, totals := delta.Compute(baseItems, items)
 		delta.WriteMarkdown(os.Stdout, *baselineFlag, rows, totals)
-		if *maxDeltaFlag >= 0 && totals.Delta > *maxDeltaFlag {
-			fmt.Fprintf(os.Stderr, "monthly delta %.2f exceeds --max-delta %.2f\n", totals.Delta, *maxDeltaFlag)
-			exitCode = 1
-		}
 	}
 
 	if cacher != nil {
 		if err := cacher.Save(); err != nil {
 			fmt.Fprintln(os.Stderr, "cache:", err)
 		}
-	}
-	if exitCode != 0 {
-		os.Exit(exitCode)
 	}
 }

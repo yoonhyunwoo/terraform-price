@@ -39,7 +39,6 @@ terraform-price --profile muhayu-hr ./terraform/rds/monster/monsterp
 | `--profile` | tfvars `account_alias` | AWS profile for price lookups |
 | `--no-cache` | `false` | Bypass the price cache for this run |
 | `--baseline` | — | Baseline directory to diff against (delta mode) |
-| `--max-delta` | unset | Exit non-zero when the monthly delta vs baseline exceeds this many USD (requires `--baseline`) |
 | `[dir]` | `.` | Target Terraform directory (positional) |
 
 Region comes from tfvars `aws_region` (default `ap-northeast-2`). All 39 regions the AWS Price List API covers are supported. The report title comes from tfvars `origin_service_name` (default: directory name).
@@ -88,7 +87,6 @@ jobs:
           role-to-assume: ${{ secrets.COST_GATE_ROLE_ARN }}
           aws-region: us-east-1
       - run: go install github.com/yoonhyunwoo/terraform-price/cmd/terraform-price@main
-      - run: terraform-price --profile default --baseline base --max-delta 100 .
 ```
 
 The gate fails (exit 1) when the signed monthly delta exceeds the threshold; cost decreases always pass. Any AWS credentials work — the Price List API returns public list prices. Changes inside module blocks (not expanded) surface as not estimated rather than as a number.
