@@ -119,6 +119,9 @@ func rootName(tr hcl.Traverser) (string, bool) {
 
 func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 	for _, s := range steps {
+		if !val.IsKnown() || val.IsNull() {
+			return cty.NilVal, false
+		}
 		switch st := s.(type) {
 		case hcl.TraverseAttr:
 			vm := val.AsValueMap()
@@ -131,9 +134,6 @@ func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 			}
 			val = v
 		case hcl.TraverseIndex:
-			if !val.IsKnown() || val.IsNull() {
-				return cty.NilVal, false
-			}
 			if st.Key.Type() == cty.String {
 				vm := val.AsValueMap()
 				if vm == nil {

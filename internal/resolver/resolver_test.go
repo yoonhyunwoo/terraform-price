@@ -64,3 +64,20 @@ func TestResolveRootIndexNoPanic(t *testing.T) {
 		t.Fatal("var[0]: numeric root index must not resolve")
 	}
 }
+
+// Regression: traversing into a null var used to panic inside cty.
+func TestNullVarTraversalNoPanic(t *testing.T) {
+	r := newResolver(t, "it = null\nm = { a = null }")
+	for _, src := range []string{`var.it.dev`, `var.m.a.b`, `var.m["k"]`} {
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Errorf("%s: panic: %v", src, p)
+				}
+			}()
+			if _, ok := r.ResolveExpr(parseExpr(t, src)); ok {
+				t.Errorf("%s: null traversal must not resolve", src)
+			}
+		}()
+	}
+}
