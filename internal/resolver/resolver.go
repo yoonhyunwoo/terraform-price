@@ -83,7 +83,10 @@ func NewResolver(dir string) *Resolver {
 	for name, la := range pending {
 		r.pendingLocs[name] = la.expr
 	}
-	r.retryLocals()
+	for r.retryLocals() {
+		// iterate: a pass may unlock locals that referenced other locals
+		// resolved later in the same pass (map order is random)
+	}
 	return r
 }
 
