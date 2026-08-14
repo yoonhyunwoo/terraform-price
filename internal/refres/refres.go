@@ -113,11 +113,7 @@ func addrsInExpr(expr hcl.Expression) []string {
 			continue
 		}
 		root, ok := t[0].(hcl.TraverseRoot)
-		if !ok {
-			continue
-		}
-		switch root.Name {
-		case "var", "local", "data", "module", "terraform", "path", "cwd", "each", "count", "self":
+		if !ok || isNonResourceRoot(root.Name) {
 			continue
 		}
 		name, ok := t[1].(hcl.TraverseAttr)
