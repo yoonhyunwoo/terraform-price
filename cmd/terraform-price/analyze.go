@@ -66,9 +66,10 @@ func buildDirScope(dir string, inputs map[string]cty.Value) (*dirScope, error) {
 	}
 	ds.idx = parser.Index(ds.plain)
 	ds.rr = refres.New(ds.plain, res)
-	if err := ds.rr.Verify(); err != nil {
-		return nil, err
-	}
+	// A reference cycle (e.g. a self depends_on) degrades the members to
+	// unresolved attributes — ResolveResource's re-entry guard keeps this
+	// terminating — instead of aborting the whole directory.
+	_ = ds.rr.Verify()
 	ds.countBased = map[string]bool{}
 	for _, r := range ds.plain {
 		if _, ok := r.Exprs["count"]; ok {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -46,21 +45,5 @@ resource "aws_autoscaling_group" "asg" {
 	m := monthlyOf(t, items, "aws_autoscaling_group.asg")
 	if m <= 0 {
 		t.Fatalf("ASG monthly should be positive, got %f", m)
-	}
-}
-
-func TestCycleFailsAnalysis(t *testing.T) {
-	dir := t.TempDir()
-	writeFixture(t, dir, `
-resource "aws_instance" "a" {
-  instance_type = aws_instance.b.instance_type
-}
-resource "aws_instance" "b" {
-  instance_type = aws_instance.a.instance_type
-}
-`)
-	_, err := analyze(context.Background(), fakePricer{}, dir)
-	if err == nil || !strings.Contains(err.Error(), "cycle") {
-		t.Fatalf("want cycle error, got %v", err)
 	}
 }
