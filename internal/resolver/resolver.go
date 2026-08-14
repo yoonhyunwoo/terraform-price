@@ -373,20 +373,6 @@ func (r *Resolver) SetResources(resources map[string]map[string]cty.Value, count
 	r.resScope = scope
 }
 
-// ResolveResourceAttr resolves an attribute of another resource.
-// Returns false if the resource or attribute is not resolvable.
-func (r *Resolver) ResolveResourceAttr(typeName, name, attr string) (cty.Value, bool) {
-	attrs, ok := r.resources[typeName+"."+name]
-	if !ok {
-		return cty.NilVal, false
-	}
-	v, ok := attrs[attr]
-	if !ok || !v.IsKnown() || v.IsNull() {
-		return cty.NilVal, false
-	}
-	return v, true
-}
-
 // ResolveLocal resolves a local value by name.
 func (r *Resolver) ResolveLocal(name string) (cty.Value, bool) {
 	v, ok := r.locals[name]
