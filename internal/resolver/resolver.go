@@ -159,11 +159,7 @@ func (r *Resolver) loadVarDefaults(dir string) {
 }
 
 func (r *Resolver) VarString(name string) (string, bool) {
-	v, ok := r.vars[name]
-	if !ok || !v.IsKnown() || v.IsNull() || v.Type() != cty.String {
-		return "", false
-	}
-	return v.AsString(), true
+	return Str(r.vars[name])
 }
 
 // scope returns the evaluation context with var/local objects and the
@@ -310,14 +306,7 @@ func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 					return cty.NilVal, false
 				}
 				val = attr
-			case idx.Type() == cty.Number && val.Type().IsListType():
-				i, _ := idx.AsBigFloat().Int64()
-				list := val.AsValueSlice()
-				if i < 0 || int(i) >= len(list) {
-					return cty.NilVal, false
-				}
-				val = list[i]
-			case idx.Type() == cty.Number && val.Type().IsTupleType():
+			case idx.Type() == cty.Number && (val.Type().IsListType() || val.Type().IsTupleType()):
 				i, _ := idx.AsBigFloat().Int64()
 				list := val.AsValueSlice()
 				if i < 0 || int(i) >= len(list) {

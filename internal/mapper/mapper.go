@@ -125,10 +125,10 @@ func resStr(r *parser.Resource, res *resolver.Resolver, key string) (string, boo
 		return "", false
 	}
 	v, ok := res.ResolveExpr(expr)
-	if !ok || !v.IsKnown() || v.IsNull() || v.Type() != cty.String {
+	if !ok {
 		return "", false
 	}
-	return v.AsString(), true
+	return resolver.Str(v)
 }
 
 func resNum(r *parser.Resource, res *resolver.Resolver, key string) (float64, bool) {
@@ -137,11 +137,10 @@ func resNum(r *parser.Resource, res *resolver.Resolver, key string) (float64, bo
 		return 0, false
 	}
 	v, ok := res.ResolveExpr(expr)
-	if !ok || !v.IsKnown() || v.IsNull() || v.Type() != cty.Number {
+	if !ok {
 		return 0, false
 	}
-	f, _ := v.AsBigFloat().Float64()
-	return f, true
+	return resolver.Num(v)
 }
 
 func resBool(r *parser.Resource, res *resolver.Resolver, key string) bool {
@@ -150,10 +149,10 @@ func resBool(r *parser.Resource, res *resolver.Resolver, key string) bool {
 		return false
 	}
 	v, ok := res.ResolveExpr(expr)
-	if !ok || !v.IsKnown() || v.IsNull() || v.Type() != cty.Bool {
+	if !ok {
 		return false
 	}
-	return v.True()
+	return resolver.Bool(v)
 }
 
 func resListFirstStr(r *parser.Resource, res *resolver.Resolver, key string) (string, bool) {
