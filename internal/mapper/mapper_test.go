@@ -314,8 +314,9 @@ func TestModuleBlockSurfacedAsUnsupported(t *testing.T) {
 
 func TestMapRDSEngineUnresolvedFails(t *testing.T) {
 	dir := t.TempDir()
+	// No default for var.engine: conditional on an unset var stays unresolved.
 	writeFile(t, dir, "rds.tf", `
-variable "engine" { default = "postgres" }
+variable "engine" { type = string }
 resource "aws_db_instance" "db" {
   instance_class = "db.t3.micro"
   engine         = var.engine == "x" ? "mysql" : "postgres"
@@ -325,6 +326,23 @@ resource "aws_db_instance" "db" {
 	kind, spec, note := MapResource(rs[0], res, idxOf(rs), "ap-northeast-2")
 	if kind != KindFixed || spec != nil || note != "engine unresolved" {
 		t.Fatalf("want Fixed/nil/'engine unresolved', got kind=%v spec=%v note=%q", kind, spec, note)
+	}
+}
+
+func TestMapRDSEngineFromVarDefault(t *testing.T) {
+	dir := t.TempDir()
+	// Variable defaults now resolve: engine = "postgres" via default.
+	writeFile(t, dir, "rds.tf", `
+variable "engine" { default = "postgres" }
+resource "aws_db_instance" "db" {
+  instance_class = "db.t3.micro"
+  engine         = var.engine
+}`)
+	rs, _ := parser.ParseDir(dir)
+	res := resolver.NewResolver(dir)
+	kind, spec, _ := MapResource(rs[0], res, idxOf(rs), "ap-northeast-2")
+	if kind != KindFixed || spec == nil {
+		t.Fatalf("want Fixed/spec with default-resolved engine, got kind=%v spec=%v", kind, spec)
 	}
 }
 

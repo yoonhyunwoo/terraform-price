@@ -1,7 +1,9 @@
 package resolver
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -21,33 +23,110 @@ func NewResolver(dir string) *Resolver {
 	r := &Resolver{vars: map[string]cty.Value{}, locals: map[string]cty.Value{}}
 	parser := hclparse.NewParser()
 
-	if fv, diags := parser.ParseHCLFile(filepath.Join(dir, "terraform.tfvars")); !diags.HasErrors() && fv != nil {
-		if attrs, d := fv.Body.JustAttributes(); !d.HasErrors() {
-			for name, attr := range attrs {
-				if val, d := attr.Expr.Value(&hcl.EvalContext{}); !d.HasErrors() {
-					r.vars[name] = val
-				}
+	// tfvars: terraform.tfvars first, then *.auto.tfvars (later wins).
+	for _, pattern := range []string{"terraform.tfvars", "*.auto.tfvars"} {
+		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
+		for _, path := range matches {
+			fv, diags := hclparse.NewParser().ParseHCLFile(path)
+			if diags.HasErrors() || fv == nil {
+				continue
 			}
-		}
-	}
-
-	if fv, diags := parser.ParseHCLFile(filepath.Join(dir, "locals.tf")); !diags.HasErrors() && fv != nil {
-		content, _, d := fv.Body.PartialContent(&hcl.BodySchema{
-			Blocks: []hcl.BlockHeaderSchema{{Type: "locals"}},
-		})
-		if !d.HasErrors() {
-			for _, blk := range content.Blocks {
-				if attrs, d := blk.Body.JustAttributes(); !d.HasErrors() {
-					for name, attr := range attrs {
-						if val, d := attr.Expr.Value(r.scope()); !d.HasErrors() {
-							r.locals[name] = val
-						}
+			if attrs, d := fv.Body.JustAttributes(); !d.HasErrors() {
+				for name, attr := range attrs {
+					if val, d := attr.Expr.Value(&hcl.EvalContext{}); !d.HasErrors() {
+						r.vars[name] = val
 					}
 				}
 			}
 		}
 	}
+
+	// Variables with defaults first — locals reference them.
+	r.loadVarDefaults(dir)
+	// Collect locals blocks from ALL .tf files (not just locals.tf) —
+	// real repos spread locals across many files.
+	type localAttr struct {
+		expr hcl.Expression
+	}
+	pending := map[string]localAttr{}
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".tf") {
+				continue
+			}
+			fv, diags := parser.ParseHCLFile(filepath.Join(dir, e.Name()))
+			if diags.HasErrors() || fv == nil {
+				continue
+			}
+			content, _, d := fv.Body.PartialContent(&hcl.BodySchema{
+				Blocks: []hcl.BlockHeaderSchema{{Type: "locals"}},
+			})
+			if d.HasErrors() {
+				continue
+			}
+			for _, blk := range content.Blocks {
+				if attrs, d := blk.Body.JustAttributes(); !d.HasErrors() {
+					for name, attr := range attrs {
+						pending[name] = localAttr{expr: attr.Expr}
+					}
+				}
+			}
+		}
+	}
+	// Iterative fixpoint: locals can reference other locals across files.
+	for changed := true; changed && len(pending) > 0; {
+		changed = false
+		for name, la := range pending {
+			if val, d := la.expr.Value(r.scope()); !d.HasErrors() {
+				r.locals[name] = val
+				delete(pending, name)
+				changed = true
+			}
+		}
+	}
 	return r
+}
+
+// loadVarDefaults reads variable blocks' default values so unset vars
+// fall back to their declared defaults (common in real repos).
+func (r *Resolver) loadVarDefaults(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".tf") {
+			continue
+		}
+		fv, diags := hclparse.NewParser().ParseHCLFile(filepath.Join(dir, e.Name()))
+		if diags.HasErrors() || fv == nil {
+			continue
+		}
+		content, _, d := fv.Body.PartialContent(&hcl.BodySchema{
+			Blocks: []hcl.BlockHeaderSchema{{Type: "variable", LabelNames: []string{"name"}}},
+		})
+		if d.HasErrors() {
+			continue
+		}
+		for _, blk := range content.Blocks {
+			name := blk.Labels[0]
+			if _, set := r.vars[name]; set {
+				continue
+			}
+			attrs, d := blk.Body.JustAttributes()
+			if d.HasErrors() {
+				continue
+			}
+			def, ok := attrs["default"]
+			if !ok {
+				continue
+			}
+			if val, d := def.Expr.Value(&hcl.EvalContext{}); !d.HasErrors() {
+				r.vars[name] = val
+			}
+		}
+	}
 }
 
 func (r *Resolver) VarString(name string) (string, bool) {
@@ -186,6 +265,15 @@ func (r *Resolver) ResolveResourceAttr(typeName, name, attr string) (cty.Value, 
 		return cty.NilVal, false
 	}
 	v, ok := attrs[attr]
+	if !ok || !v.IsKnown() || v.IsNull() {
+		return cty.NilVal, false
+	}
+	return v, true
+}
+
+// ResolveLocal resolves a local value by name.
+func (r *Resolver) ResolveLocal(name string) (cty.Value, bool) {
+	v, ok := r.locals[name]
 	if !ok || !v.IsKnown() || v.IsNull() {
 		return cty.NilVal, false
 	}
