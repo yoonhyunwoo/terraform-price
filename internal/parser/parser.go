@@ -122,3 +122,32 @@ func ParseOutputs(dir string) map[string]hcl.Expression {
 	}
 	return out
 }
+
+// VariableNames lists the directory's declared variable block names.
+func VariableNames(dir string) map[string]bool {
+	names := map[string]bool{}
+	parser := hclparse.NewParser()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return names
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".tf" {
+			continue
+		}
+		f, diags := parser.ParseHCLFile(filepath.Join(dir, e.Name()))
+		if diags.HasErrors() || f == nil {
+			continue
+		}
+		sbody, ok := f.Body.(*hclsyntax.Body)
+		if !ok {
+			continue
+		}
+		for _, blk := range sbody.Blocks {
+			if blk.Type == "variable" && len(blk.Labels) == 1 {
+				names[blk.Labels[0]] = true
+			}
+		}
+	}
+	return names
+}

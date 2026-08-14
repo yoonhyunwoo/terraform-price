@@ -38,16 +38,27 @@ func parseRegistrySource(src string) *registrySource {
 }
 
 func resolveVersion(rs *registrySource, pin string) (string, error) {
-	if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+$`, pin); ok {
-		return pin, nil
-	}
-	resp, err := fetchClient.Get(fmt.Sprintf("%s/v1/modules/%s/%s/%s/versions", registryBase, rs.namespace, rs.name, rs.provider))
+	vers, err := pickVersions(rs, pin)
 	if err != nil {
 		return "", err
 	}
+	return vers[0], nil
+}
+
+// pickVersions returns candidate versions, newest first. An exact pin
+// yields that version alone; "~>" yields the matching versions newest
+// first; no pin yields every published stable version newest first.
+func pickVersions(rs *registrySource, pin string) ([]string, error) {
+	if ok, _ := regexp.MatchString(`^\d+\.\d+\.\d+$`, pin); ok {
+		return []string{pin}, nil
+	}
+	resp, err := fetchClient.Get(fmt.Sprintf("%s/v1/modules/%s/%s/%s/versions", registryBase, rs.namespace, rs.name, rs.provider))
+	if err != nil {
+		return nil, err
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("registry versions: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("registry versions: HTTP %d", resp.StatusCode)
 	}
 	var out struct {
 		Modules []struct {
@@ -57,7 +68,7 @@ func resolveVersion(rs *registrySource, pin string) (string, error) {
 		} `json:"modules"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+		return nil, err
 	}
 	var vers []string
 	for _, m := range out.Modules {
@@ -68,19 +79,22 @@ func resolveVersion(rs *registrySource, pin string) (string, error) {
 		}
 	}
 	if len(vers) == 0 {
-		return "", fmt.Errorf("no published versions")
+		return nil, fmt.Errorf("no published versions")
 	}
 	sort.Slice(vers, func(i, j int) bool { return versionLess(vers[j], vers[i]) }) // descending
-
 	if c, ok := strings.CutPrefix(pin, "~> "); ok {
 		want := strings.Split(c, ".")
+		matched := make([]string, 0, len(vers))
 		for _, v := range vers {
 			if satisfiesPessimistic(want, strings.Split(v, ".")) {
-				return v, nil
+				matched = append(matched, v)
 			}
 		}
+		if len(matched) > 0 {
+			return matched, nil
+		}
 	}
-	return vers[0], nil
+	return vers, nil
 }
 
 // satisfiesPessimistic implements terraform's ~> constraint:
