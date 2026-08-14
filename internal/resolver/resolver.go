@@ -212,7 +212,7 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 	}
 	// Resource reference: aws_instance.a.instance_type
 	if addr, rest, ok := parser.SplitRef(t); ok {
-		typ, name, _ := strings.Cut(addr, ".")
+		typ, name, _ := parser.SplitAddr(addr)
 		return r.resolveResourceTraversal(typ, name, rest)
 	}
 	return cty.NilVal, false
@@ -344,21 +344,21 @@ func (r *Resolver) SetResources(resources map[string]map[string]cty.Value, count
 	r.resources = resources
 	byType := map[string]map[string]cty.Value{}
 	for addr, attrs := range resources {
-		parts := strings.SplitN(addr, ".", 2)
-		if len(parts) != 2 {
+		typ, name, ok := parser.SplitAddr(addr)
+		if !ok {
 			continue
 		}
-		nameObjs, ok := byType[parts[0]]
+		nameObjs, ok := byType[typ]
 		if !ok {
 			nameObjs = map[string]cty.Value{}
-			byType[parts[0]] = nameObjs
+			byType[typ] = nameObjs
 		}
 		obj := cty.ObjectVal(explodeAttrs(attrs))
 		if countBased[addr] {
 			// count/for_each resource: ref as a collection (a[*].attr, a[0])
 			obj = cty.TupleVal([]cty.Value{obj})
 		}
-		nameObjs[parts[1]] = obj
+		nameObjs[name] = obj
 	}
 	scope := make(map[string]cty.Value, len(byType))
 	for t, names := range byType {

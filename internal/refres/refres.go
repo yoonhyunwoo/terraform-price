@@ -28,10 +28,7 @@ type RefResolver struct {
 }
 
 func New(resources []*parser.Resource, res *resolver.Resolver) *RefResolver {
-	idx := make(map[string]*parser.Resource, len(resources))
-	for _, r := range resources {
-		idx[r.Type+"."+r.Name] = r
-	}
+	idx := parser.Index(resources)
 	return &RefResolver{
 		resources: idx,
 		res:       res,
@@ -176,7 +173,7 @@ func (r *RefResolver) resolveExpr(expr hcl.Expression, fromAddr string) (cty.Val
 		if attrs == nil {
 			continue // unresolvable dep: leave its root out of scope
 		}
-		typ, name, _ := strings.Cut(addr, ".")
+		typ, name, _ := parser.SplitAddr(addr)
 		if need[typ] == nil {
 			need[typ] = map[string]cty.Value{}
 		}

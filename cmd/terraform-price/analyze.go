@@ -60,10 +60,7 @@ func analyzeDir(ctx context.Context, pricer provider.Pricer, dir, region, prefix
 		}
 		plain = append(plain, r)
 	}
-	idx := make(map[string]*parser.Resource, len(plain))
-	for _, r := range plain {
-		idx[r.Type+"."+r.Name] = r
-	}
+	idx := parser.Index(plain)
 
 	// Resolve cross-resource references and inject into the resolver.
 	// Iterate: resource refs feed locals, locals feed resource attrs —
