@@ -1,6 +1,7 @@
 package main
 
 import (
+	"time"
 	"context"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider"
+	"github.com/yoonhyunwoo/terraform-price/internal/provider/awsprice"
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
 
@@ -97,7 +99,13 @@ func (c *capturePricer) UnitPrice(_ context.Context, q provider.Query) (float64,
 func TestBuildPricerComposesBeforeCache(t *testing.T) {
 	stub := &capturePricer{}
 	path := filepath.Join(t.TempDir(), "prices.json")
-	p, cacher := buildPricer(stub, false, path)
+	var p provider.Pricer = stub
+	var cacher *provider.Cached
+	if path != "" {
+		cacher = provider.NewCached(stub, path, time.Hour)
+		p = cacher
+	}
+	p = awsprice.NewComposer(p)
 	q := provider.Query{Service: "AmazonEC2", Region: "ap-northeast-2",
 		Filters: []provider.Filter{{Field: "instanceType", Value: "t3.micro"}}}
 	if _, _, err := p.UnitPrice(context.Background(), q); err != nil {

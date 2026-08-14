@@ -18,12 +18,8 @@ type Client struct {
 	client *pricing.Client
 }
 
-func NewClient(ctx context.Context, profile string) (*Client, error) {
-	opts := []func(*config.LoadOptions) error{}
-	if profile != "" {
-		opts = append(opts, config.WithSharedConfigProfile(profile))
-	}
-	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+func NewClient(ctx context.Context) (*Client, error) {
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, err
 	}

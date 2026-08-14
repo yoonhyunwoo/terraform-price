@@ -31,12 +31,10 @@ Or download a prebuilt binary from [releases](https://github.com/yoonhyunwoo/ter
 ## Usage
 
 ```sh
-terraform-price --profile muhayu-hr ./terraform/rds/monster/monsterp
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--profile` | tfvars `account_alias` | AWS profile for price lookups |
 | `--no-cache` | `false` | Bypass the price cache for this run |
 | `--baseline` | — | Baseline directory to diff against (delta mode) |
 | `[dir]` | `.` | Target Terraform directory (positional) |

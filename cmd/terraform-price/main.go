@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/delta"
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
@@ -14,18 +15,9 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
 
-func buildPricer(client provider.Pricer, noCache bool, cachePath string) (provider.Pricer, *provider.Cached) {
-	var inner provider.Pricer = client
-	var cacher *provider.Cached
-	if cachePath != "" && !noCache {
-		cacher = provider.NewCached(cachePath, inner)
-		inner = cacher
-	}
-	return awsprice.NewComposer(inner), cacher
-}
+const priceCacheTTL = 7 * 24 * time.Hour
 
 func main() {
-	profileFlag := flag.String("profile", "", "AWS profile (default: tfvars account_alias)")
 	noCacheFlag := flag.Bool("no-cache", false, "bypass the AWS Price List API price cache")
 	baselineFlag := flag.String("baseline", "", "baseline directory to diff against (e.g. a checkout of the merge-target branch)")
 	flag.Parse()
@@ -41,32 +33,28 @@ func main() {
 	if region == "" {
 		region = "ap-northeast-2"
 	}
-	profile := *profileFlag
-	if profile == "" {
-		profile, _ = res.VarString("account_alias")
-	}
-	if profile == "" {
-		profile = "default"
-	}
 	service, _ := res.VarString("origin_service_name")
 	if service == "" {
 		service = dir
 	}
 
-	client, err := awsprice.NewClient(ctx, profile)
+	client, err := awsprice.NewClient(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "aws:", err)
 		os.Exit(1)
 	}
 
-	cachePath := ""
+	var pricer provider.Pricer = client
+	var cacher *provider.Cached
 	if !*noCacheFlag {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			cachePath = filepath.Join(home, ".cache", "terraform-price", "prices.json")
+			cachePath := filepath.Join(home, ".cache", "terraform-price", "prices.json")
+			cacher = provider.NewCached(client, cachePath, priceCacheTTL)
+			pricer = cacher
 		}
 	}
-	pricer, cacher := buildPricer(client, *noCacheFlag, cachePath)
+	pricer = awsprice.NewComposer(pricer)
 
 	items, err := analyze(ctx, pricer, dir)
 	if err != nil {
