@@ -38,6 +38,8 @@ terraform-price --profile muhayu-hr ./terraform/rds/monster/monsterp
 |---|---|---|
 | `--profile` | tfvars `account_alias` | AWS profile for price lookups |
 | `--no-cache` | `false` | Bypass the price cache for this run |
+| `--baseline` | — | Baseline directory to diff against (delta mode) |
+| `--max-delta` | unset | Exit non-zero when the monthly delta vs baseline exceeds this many USD (requires `--baseline`) |
 | `[dir]` | `.` | Target Terraform directory (positional) |
 
 Region comes from tfvars `aws_region` (default `ap-northeast-2`). All 39 regions the AWS Price List API covers are supported. The report title comes from tfvars `origin_service_name` (default: directory name).
@@ -51,7 +53,7 @@ Four tables:
 - **Unsupported** — billable but not mapped yet, listed separately so gaps stay visible. VPC endpoint, VPN connection, KMS key, Route53 zone, non-Lustre FSx, launch templates (priced via the ASG/EKS node group referencing them), and more.
 - **Free** — IAM, security groups, VPC, subnets, route tables, network ACLs, ENI, DB subnet / parameter / option groups, `random_*`, `null_resource`.
 
-Regions: `ap-northeast-2/1/3` · `ap-southeast-1/2` · `us-east-1` · `us-west-2` · `eu-west-1` · `eu-central-1`.
+With `--baseline`, a `Delta vs baseline` section is appended: per-resource prior / proposed / delta rows (create, delete, update), with usage-based, unsupported, and unresolved resources listed as not estimated instead of silently dropped. The baseline is what that directory declares — not live state — so drift between state and code is not reflected.
 
 ## Notes
 
@@ -61,6 +63,35 @@ Regions: `ap-northeast-2/1/3` · `ap-southeast-1/2` · `us-east-1` · `us-west-2
 - **Modules** — module blocks are listed under Unsupported; their contents are not expanded.
 - **Usage-based fees** — data transfer and per-GB processing (e.g. NAT Gateway) are not in the Fixed total; only fixed hourly/GB-month dimensions are.
 - **RDS Proxy vCPU** — derived from instance-class naming (current-gen and legacy t2).
+
+## CI cost gate
+```yaml
+# .github/workflows/cost-gate.yml
+on: pull_request
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  cost:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4                    # PR head
+      - uses: actions/checkout@v4                    # merge target
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.COST_GATE_ROLE_ARN }}
+          aws-region: us-east-1
+      - run: go install github.com/yoonhyunwoo/terraform-price/cmd/terraform-price@main
+      - run: terraform-price --profile default --baseline base --max-delta 100 .
+```
+
+The gate fails (exit 1) when the signed monthly delta exceeds the threshold; cost decreases always pass. Any AWS credentials work — the Price List API returns public list prices. Changes inside module blocks (not expanded) surface as not estimated rather than as a number.
 
 ## License
 
