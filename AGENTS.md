@@ -44,11 +44,17 @@ wrong "fix" that duplicates identical prices. TTL is 7 days (`provider.CacheTTL`
 `$UserCacheDir/terraform-price/prices.json` forces a full refresh. The key string format is
 load-bearing (existing cache files must keep hitting) — `TestCacheKeyFormatStable` guards it.
 
-## Var / locals resolution is limited to two hardcoded files
+## Var / locals resolution sources — what is and is not read
 
-`resolver.NewResolver` parses only `terraform.tfvars` and `locals.tf` in the target directory.
-It does **not** read `*.auto.tfvars`, `terraform.tfvars.json`, `-var` / `-var-file` flags, or
-`TF_VAR_*` environment variables. `parser.ParseDir` is a separate path and reads every `*.tf`.
-Symptom of this gap: a resource prints `unresolved: …` even though its value is
-defined in a non-standard tfvars source. Extending resolution means teaching the resolver about
-those sources explicitly — the parser already covers the `.tf` side.
+`resolver.NewResolver` reads, in order: `terraform.tfvars`, then `*.auto.tfvars`
+(later files win), then `variable` block defaults from `*.tf` files (unset vars
+fall back to declared defaults), then `locals` blocks from every `*.tf` file,
+resolved iteratively to a fixpoint — locals can reference other locals across
+files and map iteration order is random, so a single pass intermittently leaves
+locals unresolved (`TestLocalsAcrossFiles` guards this). Locals that still fail
+reference computed resource attributes and stay pending until `SetResources` +
+`RetryLocals` (analyze drives that loop with `RefResolver.Reset`). It does
+**not** read `terraform.tfvars.json`, `-var` / `-var-file` flags, or `TF_VAR_*`
+environment variables. `parser.ParseDir` is a separate path and reads every
+`*.tf`. Symptom of the remaining gap: a resource prints `unresolved: …` even
+though its value is defined in a non-standard var source.
