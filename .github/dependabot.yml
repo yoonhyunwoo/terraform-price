@@ -1,12 +1,10 @@
-[.github/dependabot.yml#49B2]
-PUT 1.=6:
-+version: 2
-+updates:
-+  - package-ecosystem: gomod
-+    directory: /
-+    schedule:
-+      interval: weekly
-+  - package-ecosystem: github-actions
-+    directory: /
-+    schedule:
-+      interval: weekly
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
