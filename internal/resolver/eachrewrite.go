@@ -8,19 +8,31 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 )
 
-// rewriteEachValue replaces each.value.X with null so coalesce/try fall
-// through to var fallbacks; per-item overrides are ignored (labels only).
-// Mutates the AST in place — safe because a null literal never re-rewrites.
+// rewriteEachValue neutralizes each.value.X: coalesce/lookup args become
+// null (skipped), try/can args become an erroring traversal (try returns
+// the first argument that does not ERROR — null would win). Per-item
+// overrides are ignored (labels only). Mutates the AST in place — safe
+// because placeholders never re-rewrite.
 func rewriteEachValue(expr hclsyntax.Expression) hclsyntax.Expression {
+	return rewriteEachValueArg(expr, false)
+}
+
+func rewriteEachValueArg(expr hclsyntax.Expression, errOnEach bool) hclsyntax.Expression {
 	switch e := expr.(type) {
 	case *hclsyntax.ScopeTraversalExpr:
 		if isEachValue(e.Traversal) {
+			if errOnEach {
+				return &hclsyntax.ScopeTraversalExpr{Traversal: hcl.Traversal{
+					hcl.TraverseRoot{Name: "tfprice_undefined_each"},
+				}}
+			}
 			return &hclsyntax.LiteralValueExpr{Val: cty.NullVal(cty.DynamicPseudoType)}
 		}
 		return e
 	case *hclsyntax.FunctionCallExpr:
+		errOnEach = errOnEach || e.Name == "try" || e.Name == "can"
 		for i := range e.Args {
-			e.Args[i] = rewriteEachValue(e.Args[i])
+			e.Args[i] = rewriteEachValueArg(e.Args[i], errOnEach)
 		}
 		return e
 	case *hclsyntax.ConditionalExpr:

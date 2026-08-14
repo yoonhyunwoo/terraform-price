@@ -213,6 +213,8 @@ func (r *Resolver) scope() *hcl.EvalContext {
 }
 
 // ResolveExpr evaluates an expression against vars, locals, and resources.
+// each.value refs are neutralized (no per-item context); use
+// ResolveExprWithEach when the caller knows the for_each item.
 func (r *Resolver) ResolveExpr(expr hcl.Expression) (cty.Value, bool) {
 	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
 		return r.resolveTraversal(hcl.Traversal(ste.Traversal))
@@ -220,6 +222,38 @@ func (r *Resolver) ResolveExpr(expr hcl.Expression) (cty.Value, bool) {
 	if sx, ok := expr.(hclsyntax.Expression); ok {
 		expr = rewriteEachValue(sx)
 	}
+	if val, diags := expr.Value(r.scope()); !diags.HasErrors() {
+		return val, true
+	}
+	return cty.NilVal, false
+}
+
+// ResolveExprWithEach evaluates an expression with `each` bound to one
+// for_each item (key/value), restoring the previous binding afterwards.
+func (r *Resolver) ResolveExprWithEach(expr hcl.Expression, key, value cty.Value) (cty.Value, bool) {
+	if r.resScope == nil {
+		r.resScope = map[string]cty.Value{}
+	}
+	prev, had := r.resScope["each"]
+	r.resScope["each"] = cty.ObjectVal(map[string]cty.Value{"key": key, "value": value})
+	v, ok := r.resolveBound(expr)
+	if had {
+		r.resScope["each"] = prev
+	} else {
+		delete(r.resScope, "each")
+	}
+	return v, ok
+}
+
+func (r *Resolver) resolveBound(expr hcl.Expression) (cty.Value, bool) {
+	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
+		return r.resolveTraversal(hcl.Traversal(ste.Traversal))
+	}
+	return r.ResolveExprRaw(expr)
+}
+
+// ResolveExprRaw evaluates without the each.value rewrite.
+func (r *Resolver) ResolveExprRaw(expr hcl.Expression) (cty.Value, bool) {
 	if val, diags := expr.Value(r.scope()); !diags.HasErrors() {
 		return val, true
 	}
@@ -236,6 +270,11 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 		return navigate(t[1:], cty.ObjectVal(r.vars))
 	case "local":
 		return navigate(t[1:], cty.ObjectVal(r.locals))
+	case "each":
+		if v, ok := r.resScope["each"]; ok {
+			return navigate(t[1:], v)
+		}
+		return cty.NilVal, false
 	case "module":
 		if len(t) >= 2 {
 			if name, ok := t[1].(hcl.TraverseAttr); ok {

@@ -143,8 +143,12 @@ var lengthFunc = function.New(&function.Spec{
 	Type: function.StaticReturnType(cty.Number),
 	Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
 		val := args[0]
-		if val.Type() == cty.String {
+		switch {
+		case val.Type() == cty.String:
 			return cty.NumberIntVal(int64(len([]rune(val.AsString())))), nil
+		case val.Type().IsObjectType() && !val.IsNull():
+			// cty stdlib rejects objects; Terraform's length counts attributes.
+			return cty.NumberIntVal(int64(len(val.AsValueMap()))), nil
 		}
 		return stdlib.LengthFunc.Call([]cty.Value{val})
 	},

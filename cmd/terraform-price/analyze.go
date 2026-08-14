@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/zclconf/go-cty/cty"
@@ -86,18 +88,113 @@ func buildDirScope(dir string, inputs map[string]cty.Value) (*dirScope, error) {
 
 func (ds *dirScope) registerModules(dir, region, prefix string, depth int) {
 	for _, m := range ds.mods {
-		mi := &moduleInstance{
-			dir: dir, region: region, prefix: prefix + "module." + m.Name + ".",
-			parent: ds.res, m: m, depth: depth,
+		var fns []func() map[string]cty.Value
+		for _, mi := range ds.moduleInstances(m, dir, region, prefix, depth) {
+			fns = append(fns, mi.outputsFn)
+			ds.children = append(ds.children, mi)
 		}
-		ds.res.RegisterModule(m.Name, mi.outputsFn)
-		ds.children = append(ds.children, mi)
+		ds.res.RegisterModule(m.Name, mergeModuleFns(fns))
 	}
 	// Settle in registration order so later modules see earlier ones'
 	// outputs; scope() itself must not force (mid-build hazard).
 	for _, mi := range ds.children {
 		ds.res.ForceModule(mi.m.Name)
 	}
+}
+
+func (ds *dirScope) moduleInstances(m *parser.Resource, dir, region, prefix string, depth int) []*moduleInstance {
+	single := func() *moduleInstance {
+		return &moduleInstance{
+			dir: dir, region: region, prefix: prefix + "module." + m.Name + ".",
+			parent: ds.res, m: m, depth: depth,
+		}
+	}
+	items, known := forEachItems(m, ds.res)
+	if !known {
+		return []*moduleInstance{single()}
+	}
+	if len(items) == 0 {
+		return []*moduleInstance{single()}
+	}
+	out := make([]*moduleInstance, 0, len(items))
+	for _, it := range items {
+		out = append(out, &moduleInstance{
+			dir: dir, region: region,
+			prefix: fmt.Sprintf("%smodule.%s[%q].", prefix, m.Name, it.key),
+			parent: ds.res, m: m, depth: depth,
+			eachKey: it.key, eachKeyVal: it.keyVal, eachVal: it.val, hasEach: true,
+		})
+	}
+	return out
+}
+
+func mergeModuleFns(fns []func() map[string]cty.Value) func() map[string]cty.Value {
+	if len(fns) == 1 {
+		return fns[0]
+	}
+	return func() map[string]cty.Value {
+		out := map[string]cty.Value{}
+		for _, fn := range fns {
+			for k, v := range fn() {
+				out[k] = v
+			}
+		}
+		return out
+	}
+}
+
+type eachItem struct {
+	key    string
+	keyVal cty.Value
+	val    cty.Value
+}
+
+// forEachItems expands a module block's for_each; known=false means no
+// usable for_each (absent or unresolvable) — caller builds one instance.
+func forEachItems(m *parser.Resource, res *resolver.Resolver) ([]eachItem, bool) {
+	e, ok := m.Exprs["for_each"]
+	if !ok {
+		return nil, false
+	}
+	v, ok := res.ResolveExpr(e)
+	if !ok || !v.IsKnown() || v.IsNull() {
+		return nil, false
+	}
+	t := v.Type()
+	if t.IsMapType() || t.IsObjectType() {
+		keys := map[string]cty.Value{}
+		for it := v.ElementIterator(); it.Next(); {
+			k, val := it.Element()
+			ks, ok := resolver.Str(k)
+			if !ok {
+				return nil, false
+			}
+			keys[ks] = val
+		}
+		sorted := make([]string, 0, len(keys))
+		for k := range keys {
+			sorted = append(sorted, k)
+		}
+		sort.Strings(sorted)
+		items := make([]eachItem, 0, len(sorted))
+		for _, k := range sorted {
+			items = append(items, eachItem{key: k, keyVal: cty.StringVal(k), val: keys[k]})
+		}
+		return items, true
+	}
+	if t.IsListType() || t.IsSetType() || t.IsTupleType() {
+		var items []eachItem
+		for _, val := range v.AsValueSlice() {
+			key, ok := resolver.Str(val)
+			if !ok {
+				return nil, false
+			}
+			items = append(items, eachItem{key: key, keyVal: val, val: val})
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].key < items[j].key })
+		return items, true
+	}
+	return nil, false
 }
 
 func (ds *dirScope) fixpoint() {
@@ -120,6 +217,11 @@ type moduleInstance struct {
 	m                   *parser.Resource
 	depth               int
 
+	eachKey    string
+	eachKeyVal cty.Value
+	eachVal    cty.Value
+	hasEach    bool
+
 	built   bool
 	scope   *dirScope
 	outputs map[string]cty.Value // nil = unavailable (unfetchable/cycle)
@@ -139,7 +241,14 @@ func (mi *moduleInstance) force() {
 		if moduleMetaAttrs[k] {
 			continue
 		}
-		if v, ok := mi.parent.ResolveExpr(e); ok && v.IsKnown() && !v.IsNull() {
+		var v cty.Value
+		var ok bool
+		if mi.hasEach {
+			v, ok = mi.parent.ResolveExprWithEach(e, mi.eachKeyVal, mi.eachVal)
+		} else {
+			v, ok = mi.parent.ResolveExpr(e)
+		}
+		if ok && v.IsKnown() && !v.IsNull() {
 			inputs[k] = v
 		}
 	}
@@ -330,18 +439,61 @@ func registryModuleDir(m *parser.Resource, parent *resolver.Resolver, src string
 		return ""
 	}
 	pin := ""
+	exact := false
 	if e, ok := m.Exprs["version"]; ok {
 		if v, ok := parent.ResolveExpr(e); ok && v.IsKnown() && !v.IsNull() && v.Type() == cty.String {
 			pin = v.AsString()
+			exact = regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(pin)
 		}
 	}
-	version, err := resolveVersion(rs, pin)
+	candidates, err := pickVersions(rs, pin)
 	if err != nil {
 		return ""
 	}
-	dir, ok := fetchRegistryModule(rs, version)
-	if !ok {
-		return ""
+	if !exact {
+		candidates = newestPerMajor(candidates)
 	}
-	return dir
+	// An unpinned module written against an older interface (Terraform
+	// rejects undeclared inputs) walks back one major at a time until a
+	// version declares every input the call passes; exact pins are final.
+	var bestEffort string
+	for i, v := range candidates {
+		if i >= 10 {
+			break
+		}
+		dir, ok := fetchRegistryModule(rs, v)
+		if !ok {
+			continue
+		}
+		if bestEffort == "" {
+			bestEffort = dir
+		}
+		if moduleDeclaresInputs(dir, m) {
+			return dir
+		}
+	}
+	return bestEffort
+}
+
+func newestPerMajor(vers []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range vers {
+		maj := strings.Split(v, ".")[0]
+		if !seen[maj] {
+			seen[maj] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func moduleDeclaresInputs(dir string, m *parser.Resource) bool {
+	declared := parser.VariableNames(dir)
+	for name := range m.Exprs {
+		if !moduleMetaAttrs[name] && name != "version" && !declared[name] {
+			return false
+		}
+	}
+	return true
 }
