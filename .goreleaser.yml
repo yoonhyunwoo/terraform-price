@@ -1,0 +1,14 @@
+version: 2
+builds:
+  - env: [CGO_ENABLED=0]
+    main: ./cmd/terraform-price
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+checksum:
+  algorithm: sha256
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
