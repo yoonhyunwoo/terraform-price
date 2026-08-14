@@ -14,6 +14,9 @@ type Resource struct {
 	Type  string
 	Name  string
 	Exprs map[string]hcl.Expression
+	// BlockCounts records how many times a repeated nested block type
+	// appeared (Exprs keeps only the last instance's attributes).
+	BlockCounts map[string]int
 }
 
 func ParseDir(dir string) ([]*Resource, error) {
@@ -40,9 +43,13 @@ func ParseDir(dir string) ([]*Resource, error) {
 		for _, blk := range sbody.Blocks {
 			if blk.Type == "resource" && len(blk.Labels) == 2 {
 				exprs := map[string]hcl.Expression{}
-				collectExprs(blk.Body, "", exprs)
+				counts := map[string]int{}
+				collectExprsCounts(blk.Body, "", exprs, counts)
+				if len(counts) == 0 {
+					counts = nil
+				}
 				resources = append(resources, &Resource{
-					Type: blk.Labels[0], Name: blk.Labels[1], Exprs: exprs,
+					Type: blk.Labels[0], Name: blk.Labels[1], Exprs: exprs, BlockCounts: counts,
 				})
 				continue
 			}
@@ -61,6 +68,10 @@ func ParseDir(dir string) ([]*Resource, error) {
 }
 
 func collectExprs(body *hclsyntax.Body, prefix string, out map[string]hcl.Expression) {
+	collectExprsCounts(body, prefix, out, nil)
+}
+
+func collectExprsCounts(body *hclsyntax.Body, prefix string, out map[string]hcl.Expression, counts map[string]int) {
 	for name, attr := range body.Attributes {
 		key := name
 		if prefix != "" {
@@ -73,6 +84,9 @@ func collectExprs(body *hclsyntax.Body, prefix string, out map[string]hcl.Expres
 		if prefix != "" {
 			bkey = prefix + "." + blk.Type
 		}
+		if blk.Type != "dynamic" && counts != nil {
+			counts[bkey]++
+		}
 		if blk.Type == "dynamic" && len(blk.Labels) == 1 {
 			// dynamic "x" { content { ... } }: register content attrs
 			// under x.* so mapper probes hit.
@@ -84,10 +98,10 @@ func collectExprs(body *hclsyntax.Body, prefix string, out map[string]hcl.Expres
 				if prefix != "" {
 					ckey = prefix + "." + blk.Labels[0]
 				}
-				collectExprs(inner.Body, ckey, out)
+				collectExprsCounts(inner.Body, ckey, out, nil)
 			}
 		}
-		collectExprs(blk.Body, bkey, out)
+		collectExprsCounts(blk.Body, bkey, out, counts)
 	}
 }
 

@@ -34,7 +34,13 @@ func (fakePricer) UnitPrice(_ context.Context, q provider.Query) (float64, strin
 				return 0.045, "Hrs", nil
 			case "RDS:GP3-Storage":
 				return 0.131, "GB-Mo", nil
+			case "WebACLV2":
+				return 5.0, "Month", nil
+			case "RuleV2":
+				return 1.0, "Month", nil
 			}
+		case "location":
+			return 0.10, "Hrs", nil
 		}
 	}
 	return 0, "", fmt.Errorf("no fake price for filters %+v", q.Filters)

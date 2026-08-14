@@ -49,8 +49,6 @@ var infoTypes = map[string]string{
 	"aws_docdb_cluster":           "DocumentDB cluster — instance cost is priced via aws_docdb_cluster_instance",
 	"aws_neptune_cluster":         "Neptune cluster — instance cost is priced via aws_neptune_cluster_instance",
 	"aws_vpc_endpoint":            "VPC endpoint — per-service hourly (not priced yet)",
-	"aws_kms_key":                 "KMS key — $1/month flat (Price List unit needs live confirmation)",
-	"aws_route53_zone":            "Route53 hosted zone — $0.50/month global (price needs live confirmation)",
 	"module":                      "module source not analyzable (git::/private/unfetchable) — resources inside are not estimated",
 	"aws_fsx_windows_file_system": "FSx Windows — GB-month (only Lustre is priced)",
 	"aws_fsx_ontap_file_system":   "FSx ONTAP — GB-month (only Lustre is priced)",
@@ -96,13 +94,16 @@ var freeTypes = map[string]struct{}{
 type Spec struct {
 	ServiceCode string
 	Region      string
-	Filters     []provider.Filter
-	UsageQty    float64
-	Count       int
-	Label       string
-	Note        string
-	PreferUnit  string
-	Rates       []Rate
+	// Global marks price rows that are not region-specific (Route53
+	// zones): no location filter, usagetype used verbatim.
+	Global     bool
+	Filters    []provider.Filter
+	UsageQty   float64
+	Count      int
+	Label      string
+	Note       string
+	PreferUnit string
+	Rates      []Rate
 }
 
 type Rate struct {
@@ -273,6 +274,12 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 		spec, note, ok = mapLB(r, res)
 	case "aws_vpn_gateway":
 		spec, note, ok = mapVPNGateway(r, res)
+	case "aws_kms_key":
+		spec, note, ok = mapKMSKey(r, region)
+	case "aws_route53_zone":
+		spec, note, ok = mapRoute53Zone()
+	case "aws_wafv2_web_acl":
+		spec, note, ok = mapWAFACL(r, res)
 	case "aws_fsx_lustre_filesystem":
 		spec, note, ok = mapFSxLustre(r, res)
 	default:
@@ -284,7 +291,7 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	if !ok {
 		return KindFixed, nil, note
 	}
-	if spec != nil {
+	if spec != nil && !spec.Global {
 		spec.Region = region
 		for i := range spec.Rates {
 			spec.Rates[i].Region = region
@@ -618,6 +625,33 @@ func ExtraSpecs(r *parser.Resource, res *resolver.Resolver, idx map[string]*pars
 		return nodeGroupStorageSpecs(r, res)
 	case "aws_db_instance", "aws_rds_cluster_instance":
 		return rdsStorageSpecs(r, res)
+	case "aws_wafv2_web_acl":
+		if n := r.BlockCounts["rule"]; n > 0 {
+			return []*Spec{{
+				ServiceCode: "AWSWAF",
+				Filters:     []provider.Filter{tm("usagetype", "RuleV2")},
+				UsageQty:    float64(n), Count: 1,
+				Label:      fmt.Sprintf("%d WAF rules", n),
+				PreferUnit: "Month",
+			}}
+		}
+		if e, ok := r.Exprs["rules"]; ok {
+			if v, ok := res.ResolveExpr(e); ok && v.IsKnown() && !v.IsNull() {
+				t := v.Type()
+				if t.IsListType() || t.IsSetType() || t.IsTupleType() {
+					if n := v.LengthInt(); n > 0 {
+						return []*Spec{{
+							ServiceCode: "AWSWAF",
+							Filters:     []provider.Filter{tm("usagetype", "RuleV2")},
+							UsageQty:    float64(n), Count: 1,
+							Label:      fmt.Sprintf("%d WAF rules", n),
+							PreferUnit: "Month",
+						}}
+					}
+				}
+			}
+		}
+		return nil
 	}
 	return nil
 }
@@ -703,6 +737,44 @@ func rdsStorageSpecs(r *parser.Resource, res *resolver.Resolver) []*Spec {
 		UsageQty: size, Count: 1, Label: fmt.Sprintf("%s storage %gGB", vtype, size),
 		PreferUnit: "GB-Mo",
 	}}
+}
+
+func mapKMSKey(r *parser.Resource, region string) (*Spec, string, bool) {
+	return &Spec{
+		ServiceCode: "AWSKMS",
+		// KMS usagetypes carry the full region code as prefix.
+		Filters:  []provider.Filter{tm("usagetype", region+"-KMS-Keys")},
+		UsageQty: 1, Count: 1, Label: "customer managed key",
+		PreferUnit: "Keys",
+	}, "", true
+}
+
+func mapRoute53Zone() (*Spec, string, bool) {
+	return &Spec{
+		ServiceCode: "AmazonRoute53",
+		Global:      true,
+		Filters:     []provider.Filter{tm("usagetype", "HostedZone")},
+		UsageQty:    1, Count: 1, Label: "hosted zone (first 25 tier)",
+		PreferUnit: "HostedZone",
+	}, "", true
+}
+
+func mapWAFACL(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
+	rules := r.BlockCounts["rule"]
+	if e, ok := r.Exprs["rules"]; ok {
+		if v, ok := res.ResolveExpr(e); ok && v.IsKnown() && !v.IsNull() {
+			t := v.Type()
+			if t.IsListType() || t.IsSetType() || t.IsTupleType() {
+				rules = max(rules, v.LengthInt())
+			}
+		}
+	}
+	return &Spec{
+		ServiceCode: "AWSWAF",
+		Filters:     []provider.Filter{tm("usagetype", "WebACLV2")},
+		UsageQty:    1, Count: 1, Label: fmt.Sprintf("web ACL (+%d rules)", rules),
+		PreferUnit: "Month",
+	}, "", true
 }
 
 func mapEBS(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {

@@ -3,6 +3,7 @@ package awsprice
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/provider"
 )
@@ -109,6 +110,11 @@ var usEast1UnprefixedUsagetypes = map[string]bool{
 // compose must run before provider.Cached: the location filter it injects is
 // part of the cache key, so regions never collide on one key.
 func compose(q provider.Query) (provider.Query, error) {
+	if q.Region == "" {
+		// Global services (Route53 zones): no location filter, usagetype
+		// used verbatim.
+		return q, nil
+	}
 	loc, ok := regionToLocation[q.Region]
 	if !ok {
 		return provider.Query{}, fmt.Errorf("unknown region %q (%d regions supported)", q.Region, len(regionToLocation))
@@ -116,8 +122,15 @@ func compose(q provider.Query) (provider.Query, error) {
 	prefix := regionToUsagePrefix[q.Region]
 	filters := make([]provider.Filter, 0, len(q.Filters)+1)
 	for _, f := range q.Filters {
-		if f.Field == "usagetype" && !(q.Region == "us-east-1" && usEast1UnprefixedUsagetypes[f.Value]) {
-			f.Value = prefix + "-" + f.Value
+		if f.Field == "usagetype" {
+			switch {
+			case q.Region == "us-east-1" && usEast1UnprefixedUsagetypes[f.Value]:
+			case strings.HasPrefix(f.Value, q.Region+"-"):
+				// KMS ships usagetypes prefixed with the region code
+				// (ap-northeast-2-KMS-Keys), not the short form.
+			default:
+				f.Value = prefix + "-" + f.Value
+			}
 		}
 		filters = append(filters, f)
 	}

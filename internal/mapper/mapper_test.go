@@ -232,8 +232,8 @@ resource "aws_kms_key" "k" {}
 				t.Errorf("unknown type: want Unsupported w/ note, got kind=%v note=%q", kind, note)
 			}
 		case "aws_kms_key":
-			if kind != KindUnsupported {
-				t.Errorf("kms (deferred D): want Unsupported note, got kind=%v", kind)
+			if kind != KindFixed {
+				t.Errorf("kms: want Fixed, got kind=%v", kind)
 			}
 		}
 	}

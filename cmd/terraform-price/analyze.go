@@ -389,9 +389,11 @@ func priceOneResource(ctx context.Context, pricer provider.Pricer, r *parser.Res
 	}
 	items := []output.CostItem{pricedItem(ctx, pricer, addr, r.Type, spec)}
 	for _, extra := range mapper.ExtraSpecs(r, res, idx) {
-		extra.Region = region
-		for i := range extra.Rates {
-			extra.Rates[i].Region = region
+		if !extra.Global {
+			extra.Region = region
+			for i := range extra.Rates {
+				extra.Rates[i].Region = region
+			}
 		}
 		extra.Count *= spec.Count
 		items = append(items, pricedItem(ctx, pricer, addr, r.Type, extra))
