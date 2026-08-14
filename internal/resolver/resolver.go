@@ -21,8 +21,20 @@ type Resolver struct {
 	resScope    map[string]cty.Value // resource TYPE → ObjectVal{name → attrs}
 }
 
+// NewResolver builds a resolver over a Terraform directory.
 func NewResolver(dir string) *Resolver {
+	return NewResolverWithVars(dir, nil)
+}
+
+// NewResolverWithVars builds a resolver with externally supplied variable
+// values (module inputs) layered on top of the directory's own tfvars —
+// module instantiation. Inputs win over tfvars, and the child's variable
+// defaults still backstop anything unset.
+func NewResolverWithVars(dir string, inputs map[string]cty.Value) *Resolver {
 	r := &Resolver{vars: map[string]cty.Value{}, locals: map[string]cty.Value{}}
+	for k, v := range inputs {
+		r.vars[k] = v
+	}
 	parser := hclparse.NewParser()
 
 	// tfvars: terraform.tfvars first, then *.auto.tfvars (later wins).
