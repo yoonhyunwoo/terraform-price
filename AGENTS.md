@@ -27,6 +27,6 @@ and deleting `$UserCacheDir/terraform-price/prices.json` forces a full refresh.
 `resolver.NewResolver` parses only `terraform.tfvars` and `locals.tf` in the target directory.
 It does **not** read `*.auto.tfvars`, `terraform.tfvars.json`, `-var` / `-var-file` flags, or
 `TF_VAR_*` environment variables. `parser.ParseDir` is a separate path and reads every `*.tf`.
-Symptom of this gap: a resource prints `⚠️ … 미해석` (unresolved) even though its value is
+Symptom of this gap: a resource prints `unresolved: …` even though its value is
 defined in a non-standard tfvars source. Extending resolution means teaching the resolver about
 those sources explicitly — the parser already covers the `.tf` side.

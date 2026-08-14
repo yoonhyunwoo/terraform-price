@@ -16,7 +16,7 @@ import (
 
 func main() {
 	profileFlag := flag.String("profile", "", "AWS profile (default: tfvars account_alias)")
-	noCacheFlag := flag.Bool("no-cache", false, "AWS Price List API 결과 캐시 사용 안 함")
+	noCacheFlag := flag.Bool("no-cache", false, "bypass the AWS Price List API price cache")
 	flag.Parse()
 	dir := "."
 	if flag.NArg() > 0 {
@@ -35,7 +35,7 @@ func main() {
 		profile, _ = res.VarString("account_alias")
 	}
 	if profile == "" {
-		fmt.Fprintln(os.Stderr, "AWS 프로파일을 tfvars(account_alias)에서 찾을 수 없습니다. --profile <이름> 지정.")
+		fmt.Fprintln(os.Stderr, "AWS profile not found in tfvars (account_alias); pass --profile <name>.")
 		os.Exit(1)
 	}
 	service, _ := res.VarString("origin_service_name")
@@ -86,7 +86,7 @@ func main() {
 		}
 		p, unit, err := pricer.UnitPrice(ctx, spec.ServiceCode, spec.Filters, spec.PreferUnit)
 		if err != nil {
-			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "단가 조회 실패: " + err.Error()})
+			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "price lookup failed: " + err.Error()})
 			continue
 		}
 		items = append(items, output.CostItem{

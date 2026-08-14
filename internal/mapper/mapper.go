@@ -25,32 +25,32 @@ const (
 )
 
 var usageTypes = map[string]string{
-	"aws_s3_bucket":               "S3 객체 저장·요청·데이터 전송 (usage 기반)",
-	"aws_lambda_function":         "Lambda 요청·GB-초 (usage 기반)",
-	"aws_sqs_queue":               "SQS 요청 (usage 기반)",
-	"aws_sns_topic":               "SNS 요청 (usage 기반)",
-	"aws_dynamodb_table":          "DynamoDB RCU/WCU 또는 on-demand (usage 기반)",
-	"aws_cloudwatch_log_group":    "CloudWatch Logs 수집·저장 (usage 기반)",
-	"aws_cloudfront_distribution": "CloudFront 데이터 전송·요청 (usage 기반)",
-	"aws_apigateway_rest_api":     "API Gateway 요청 (usage 기반)",
-	"aws_apigatewayv2_api":        "API Gateway 요청 (usage 기반)",
-	"aws_codebuild_project":       "CodeBuild 빌드 분 (usage 기반)",
-	"aws_kinesis_stream":          "Kinesis 샤드-시간+페이로드 (usage 기반)",
-	"aws_efs_file_system":         "EFS GB-월, 동적 용량 (usage 기반)",
+	"aws_s3_bucket":               "S3 storage, requests, and data transfer (usage-based)",
+	"aws_lambda_function":         "Lambda requests and GB-seconds (usage-based)",
+	"aws_sqs_queue":               "SQS requests (usage-based)",
+	"aws_sns_topic":               "SNS requests (usage-based)",
+	"aws_dynamodb_table":          "DynamoDB RCU/WCU or on-demand (usage-based)",
+	"aws_cloudwatch_log_group":    "CloudWatch Logs ingestion and storage (usage-based)",
+	"aws_cloudfront_distribution": "CloudFront data transfer and requests (usage-based)",
+	"aws_apigateway_rest_api":     "API Gateway requests (usage-based)",
+	"aws_apigatewayv2_api":        "API Gateway requests (usage-based)",
+	"aws_codebuild_project":       "CodeBuild build minutes (usage-based)",
+	"aws_kinesis_stream":          "Kinesis shard-hours plus payload (usage-based)",
+	"aws_efs_file_system":         "EFS GB-month, dynamic size (usage-based)",
 }
 
 var infoTypes = map[string]string{
-	"aws_launch_template":            "런치템플릿 — ASG/EKS 노드그룹 참조 시 산정",
-	"aws_launch_configuration":       "런치템플릿 — ASG 참조 시 산정",
-	"aws_docdb_cluster":              "DocumentDB 클러스터 — 인스턴스 비용은 aws_docdb_cluster_instance에서 산정",
-	"aws_neptune_cluster":            "Neptune 클러스터 — 인스턴스 비용은 aws_neptune_cluster_instance에서 산정",
-	"aws_vpc_endpoint":               "VPC endpoint — 서비스별 시간당 (단가 산정 안 됨)",
-	"aws_vpn_connection":             "VPN 연결 — 시간당 (usagetype 미지원)",
-	"aws_kms_key":                    "KMS 키 — $1/월 고정 (Price List 단가 unit 라이브 확인 필요)",
-	"aws_route53_zone":               "Route53 호스티드존 — $0.50/월 Global (단가 라이브 확인 필요)",
-	"aws_fsx_windows_file_system":    "FSx Windows — GB-월 (lustre만 산정)",
-	"aws_fsx_ontap_file_system":      "FSx ONTAP — GB-월 (lustre만 산정)",
-	"aws_fsx_openzfs_file_system":    "FSx OpenZFS — GB-월 (lustre만 산정)",
+	"aws_launch_template":         "launch template — priced via the ASG/EKS node group referencing it",
+	"aws_launch_configuration":    "launch config — priced via the ASG referencing it",
+	"aws_docdb_cluster":           "DocumentDB cluster — instance cost is priced via aws_docdb_cluster_instance",
+	"aws_neptune_cluster":         "Neptune cluster — instance cost is priced via aws_neptune_cluster_instance",
+	"aws_vpc_endpoint":            "VPC endpoint — per-service hourly (not priced yet)",
+	"aws_vpn_connection":          "VPN connection — hourly (usagetype unsupported)",
+	"aws_kms_key":                 "KMS key — $1/month flat (Price List unit needs live confirmation)",
+	"aws_route53_zone":            "Route53 hosted zone — $0.50/month global (price needs live confirmation)",
+	"aws_fsx_windows_file_system": "FSx Windows — GB-month (only Lustre is priced)",
+	"aws_fsx_ontap_file_system":   "FSx ONTAP — GB-month (only Lustre is priced)",
+	"aws_fsx_openzfs_file_system": "FSx OpenZFS — GB-month (only Lustre is priced)",
 }
 
 var freeTypes = map[string]struct{}{
@@ -248,7 +248,7 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 		return KindVariable, nil, desc
 	}
 	if _, ok := freeTypes[r.Type]; ok {
-		return KindFree, nil, "무과금 리소스"
+		return KindFree, nil, "no-charge resource"
 	}
 	if desc, ok := infoTypes[r.Type]; ok {
 		return KindUnsupported, nil, desc
@@ -307,7 +307,7 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	case "aws_fsx_lustre_filesystem":
 		spec, note, ok = mapFSxLustre(r, res, loc, region)
 	default:
-		return KindUnsupported, nil, "미지원 리소스 (단가 산정 안 됨)"
+		return KindUnsupported, nil, "unsupported resource type (not priced)"
 	}
 	if !ok {
 		return KindFixed, nil, note
@@ -318,7 +318,7 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 func mapEC2(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
 	it, ok := resStr(r, res, "instance_type")
 	if !ok {
-		return nil, "instance_type 미해석", false
+		return nil, "instance_type unresolved", false
 	}
 	tenancy := "Shared"
 	if t, ok := resStr(r, res, "tenancy"); ok {
@@ -336,7 +336,7 @@ func mapEC2(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 func mapRDS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
 	ic, ok := resStr(r, res, "instance_class")
 	if !ok {
-		return nil, "instance_class 미해석", false
+		return nil, "instance_class unresolved", false
 	}
 	engine, _ := resStr(r, res, "engine")
 	deploy := "Single-AZ"
@@ -358,7 +358,7 @@ func mapRDS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 func mapAuroraInstance(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, loc string) (*Spec, string, bool) {
 	ic, ok := resStr(r, res, "instance_class")
 	if !ok {
-		return nil, "instance_class 미해석", false
+		return nil, "instance_class unresolved", false
 	}
 	engine, ok := resStr(r, res, "engine")
 	if !ok {
@@ -388,37 +388,37 @@ func mapAuroraCluster(r *parser.Resource, res *resolver.Resolver, loc, region st
 		return Rate{
 			Label: label, ServiceCode: "AmazonRDS",
 			Filters:    []ptypes.Filter{tm("usagetype", ut), tm("location", loc)},
-			PreferUnit: "GB-Mo", DisplayUnit: "GB-월",
+			PreferUnit: "GB-Mo", DisplayUnit: "GB-mo",
 		}, true
 	}
 	var rates []Rate
 	if st == "aurora-iopt1" {
-		rt, ok := storRate("Aurora:IO-OptimizedStorageUsage", "스토리지(I/O-Optimized)")
+		rt, ok := storRate("Aurora:IO-OptimizedStorageUsage", "storage (I/O-Optimized)")
 		if !ok {
-			return nil, "Aurora usagetype(리전) 미해석", false
+			return nil, "Aurora usagetype (region) unresolved", false
 		}
 		rates = []Rate{rt}
 	} else {
-		stor, ok := storRate("Aurora:StorageUsage", "스토리지")
+		stor, ok := storRate("Aurora:StorageUsage", "storage")
 		if !ok {
-			return nil, "Aurora usagetype(리전) 미해석", false
+			return nil, "Aurora usagetype (region) unresolved", false
 		}
 		ioUT, _ := usageType(region, "Aurora:StorageIOUsage")
 		rates = []Rate{stor, {
 			Label: "I/O", ServiceCode: "AmazonRDS",
 			Filters:     []ptypes.Filter{tm("usagetype", ioUT), tm("location", loc)},
 			PreferUnit:  "IOs",
-			DisplayMult: 1_000_000, DisplayUnit: "100만 I/O",
+			DisplayMult: 1_000_000, DisplayUnit: "1M I/O",
 		}}
 	}
-	return &Spec{Label: "Aurora 스토리지·I/O", Rates: rates},
-		"Aurora 스토리지·I/O — 사용량만큼 청구 (인스턴스는 aws_rds_cluster_instance에서 산정)", true
+	return &Spec{Label: "Aurora storage & I/O", Rates: rates},
+		"Aurora storage & I/O — billed by usage (instances are priced via aws_rds_cluster_instance)", true
 }
 
 func mapSecret(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
 	ut, ok := usageType(region, "AWSSecretsManager-Secrets")
 	if !ok {
-		return nil, "Secrets Manager usagetype(리전) 미해석", false
+		return nil, "Secrets Manager usagetype (region) unresolved", false
 	}
 	return &Spec{
 		ServiceCode: "AWSSecretsManager",
@@ -433,7 +433,7 @@ func mapSecret(r *parser.Resource, res *resolver.Resolver, loc, region string) (
 func mapDBProxy(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, loc, region string) (*Spec, string, bool) {
 	ut, ok := usageType(region, "RDS:ProxyUsage")
 	if !ok {
-		return nil, "RDS Proxy usagetype(리전) 미해석", false
+		return nil, "RDS Proxy usagetype (region) unresolved", false
 	}
 	filters := []ptypes.Filter{tm("usagetype", ut), tm("location", loc)}
 	if vcpu := proxyTargetVCPU(r, res, idx); vcpu > 0 {
@@ -446,8 +446,8 @@ func mapDBProxy(r *parser.Resource, res *resolver.Resolver, idx map[string]*pars
 	return &Spec{Label: "RDS Proxy", Rates: []Rate{{
 		Label: "vCPU", ServiceCode: "AmazonRDS",
 		Filters:    filters,
-		PreferUnit: "Hrs", DisplayUnit: "vCPU-시간",
-	}}}, "RDS Proxy — 대상 인스턴스 vCPU 미해석, 월 ≈ 단가 × vCPU 수 × 730", true
+		PreferUnit:  "Hrs", DisplayUnit: "vCPU-hour",
+	}}}, "RDS Proxy — target vCPU unresolved, monthly ≈ unit price × vCPU count × 730", true
 }
 
 func proxyTargetVCPU(proxy *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) int {
@@ -514,7 +514,7 @@ func auroraEngine(e string) string {
 func mapDBInstance(r *parser.Resource, res *resolver.Resolver, loc, serviceCode string) (*Spec, string, bool) {
 	ic, ok := resStr(r, res, "instance_class")
 	if !ok {
-		return nil, "instance_class 미해석", false
+		return nil, "instance_class unresolved", false
 	}
 	return &Spec{
 		ServiceCode: serviceCode,
@@ -530,7 +530,7 @@ func mapDBInstance(r *parser.Resource, res *resolver.Resolver, loc, serviceCode 
 func mapRedshift(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
 	it, ok := resStr(r, res, "node_type")
 	if !ok {
-		return nil, "node_type 미해석", false
+		return nil, "node_type unresolved", false
 	}
 	count := 1
 	if n, ok := resNum(r, res, "number_of_nodes"); ok && n > 0 {
@@ -549,7 +549,7 @@ func mapRedshift(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec,
 func mapOpenSearch(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
 	it, ok := resStr(r, res, "cluster_config.instance_type")
 	if !ok {
-		return nil, "cluster_config.instance_type 미해석", false
+		return nil, "cluster_config.instance_type unresolved", false
 	}
 	count := 1
 	if n, ok := resNum(r, res, "cluster_config.instance_count"); ok && n > 0 {
@@ -568,7 +568,7 @@ func mapOpenSearch(r *parser.Resource, res *resolver.Resolver, loc string) (*Spe
 func mapMSK(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
 	it, ok := resStr(r, res, "broker_node_group_info.instance_type")
 	if !ok {
-		return nil, "broker instance_type 미해석", false
+		return nil, "broker instance_type unresolved", false
 	}
 	computeFamily := strings.TrimPrefix(it, "kafka.")
 	count := 1
@@ -589,7 +589,7 @@ func mapMSK(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, stri
 func mapElastiCache(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
 	nt, ok := resStr(r, res, "node_type")
 	if !ok {
-		return nil, "node_type 미해석", false
+		return nil, "node_type unresolved", false
 	}
 	engine := "Redis"
 	if e, ok := resStr(r, res, "engine"); ok {
@@ -616,7 +616,7 @@ func mapElastiCache(r *parser.Resource, res *resolver.Resolver, loc string) (*Sp
 func mapEBS(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
 	size, ok := resNum(r, res, "size")
 	if !ok {
-		return nil, "size 미해석", false
+		return nil, "size unresolved", false
 	}
 	vtype := "gp3"
 	if t, ok := resStr(r, res, "type"); ok {
@@ -647,14 +647,14 @@ func mapASG(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.R
 		lt = refResource(src, idx)
 	}
 	if lt == nil {
-		return nil, "ASG launch_template/launch_configuration 참조 미해석", false
+		return nil, "ASG launch_template/launch_configuration reference unresolved", false
 	}
 	it, ok := resStr(lt, res, "instance_type")
 	if !ok {
-		return nil, "launch_template instance_type 미해석", false
+		return nil, "launch_template instance_type unresolved", false
 	}
 	if count == 0 {
-		return nil, "ASG 용량(desired/min) 미해석", false
+		return nil, "ASG capacity (desired/min) unresolved", false
 	}
 	return ec2InstanceSpec(it, loc, fmt.Sprintf("%s × %d (ASG)", it, count), count), "", true
 }
@@ -678,10 +678,10 @@ func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]
 		}
 	}
 	if it == "" {
-		return nil, "EKS node group instance_type 미해석 (launch_template/instance_types)", false
+		return nil, "EKS node group instance_type unresolved (launch_template/instance_types)", false
 	}
 	if count == 0 {
-		return nil, "EKS node group desired_size 미해석", false
+		return nil, "EKS node group desired_size unresolved", false
 	}
 	return ec2InstanceSpec(it, loc, fmt.Sprintf("%s × %d (EKS node)", it, count), count), "", true
 }
@@ -689,7 +689,7 @@ func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]
 func mapNATGateway(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
 	ut, ok := usageType(region, "NatGateway-Hours")
 	if !ok {
-		return nil, "NAT GW usagetype(리전) 미해석", false
+		return nil, "NAT GW usagetype (region) unresolved", false
 	}
 	return &Spec{
 		ServiceCode: "AmazonEC2",
@@ -704,7 +704,7 @@ func mapNATGateway(r *parser.Resource, res *resolver.Resolver, loc, region strin
 func mapVPNGateway(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
 	ut, ok := usageType(region, "VPNGateway-Hours")
 	if !ok {
-		return nil, "VPN GW usagetype(리전) 미해석", false
+		return nil, "VPN GW usagetype (region) unresolved", false
 	}
 	return &Spec{
 		ServiceCode: "AmazonEC2",
@@ -719,7 +719,7 @@ func mapVPNGateway(r *parser.Resource, res *resolver.Resolver, loc, region strin
 func mapLB(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, string, bool) {
 	lbt, ok := resStr(r, res, "load_balancer_type")
 	if !ok || lbt == "" {
-		return nil, "load_balancer_type 미해석", false
+		return nil, "load_balancer_type unresolved", false
 	}
 	lbt = strings.ToUpper(lbt[:1]) + lbt[1:]
 	return &Spec{
@@ -735,11 +735,11 @@ func mapLB(r *parser.Resource, res *resolver.Resolver, loc string) (*Spec, strin
 func mapFSxLustre(r *parser.Resource, res *resolver.Resolver, loc, region string) (*Spec, string, bool) {
 	size, ok := resNum(r, res, "storage_capacity")
 	if !ok {
-		return nil, "storage_capacity 미해석", false
+		return nil, "storage_capacity unresolved", false
 	}
 	ut, ok := usageType(region, "FSxLustre-Storage-GB-Mo")
 	if !ok {
-		return nil, "FSx usagetype(리전) 미해석", false
+		return nil, "FSx usagetype (region) unresolved", false
 	}
 	return &Spec{
 		ServiceCode: "AmazonFSx",
