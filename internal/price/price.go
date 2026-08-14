@@ -56,8 +56,13 @@ func (c *Client) UnitPrice(ctx context.Context, serviceCode string, filters []pt
 	if err != nil {
 		return 0, "", err
 	}
-	var firstPrice, firstUnit string
-	for _, raw := range out.PriceList {
+	return pickPrice(out.PriceList, serviceCode, preferUnit)
+}
+
+func pickPrice(rows []string, serviceCode, preferUnit string) (float64, string, error) {
+	var firstPrice float64
+	var firstUnit string
+	for _, raw := range rows {
 		var doc priceListDoc
 		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 			continue
@@ -71,15 +76,17 @@ func (c *Client) UnitPrice(ctx context.Context, serviceCode string, filters []pt
 				if preferUnit != "" && dim.Unit == preferUnit {
 					return p, dim.Unit, nil
 				}
-				if firstPrice == "" {
-					firstPrice, firstUnit = dim.PricePerUnit.USD, dim.Unit
+				if firstUnit == "" {
+					firstPrice, firstUnit = p, dim.Unit
 				}
 			}
 		}
 	}
-	if firstPrice != "" {
-		p, _ := strconv.ParseFloat(firstPrice, 64)
-		return p, firstUnit, nil
+	if firstUnit == "" {
+		return 0, "", fmt.Errorf("no price match")
 	}
-	return 0, "", fmt.Errorf("no price match")
+	if preferUnit != "" {
+		return 0, "", fmt.Errorf("no OnDemand price with unit %q for %s (available unit: %s)", preferUnit, serviceCode, firstUnit)
+	}
+	return firstPrice, firstUnit, nil
 }

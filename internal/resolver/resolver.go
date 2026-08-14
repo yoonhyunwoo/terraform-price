@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"math/big"
 	"path/filepath"
 
 	"github.com/hashicorp/hcl/v2"
@@ -78,7 +79,11 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 		if len(t) < 2 {
 			return cty.NilVal, false
 		}
-		v, ok := r.vars[t[1].(hcl.TraverseAttr).Name]
+		name, ok := rootName(t[1])
+		if !ok {
+			return cty.NilVal, false
+		}
+		v, ok := r.vars[name]
 		if !ok {
 			return cty.NilVal, false
 		}
@@ -87,7 +92,11 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 		if len(t) < 2 {
 			return cty.NilVal, false
 		}
-		v, ok := r.locals[t[1].(hcl.TraverseAttr).Name]
+		name, ok := rootName(t[1])
+		if !ok {
+			return cty.NilVal, false
+		}
+		v, ok := r.locals[name]
 		if !ok {
 			return cty.NilVal, false
 		}
@@ -96,21 +105,63 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 	return cty.NilVal, false
 }
 
+func rootName(tr hcl.Traverser) (string, bool) {
+	switch s := tr.(type) {
+	case hcl.TraverseAttr:
+		return s.Name, true
+	case hcl.TraverseIndex:
+		if s.Key.Type() == cty.String {
+			return s.Key.AsString(), true
+		}
+	}
+	return "", false
+}
+
 func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 	for _, s := range steps {
-		attr, ok := s.(hcl.TraverseAttr)
-		if !ok {
+		switch st := s.(type) {
+		case hcl.TraverseAttr:
+			vm := val.AsValueMap()
+			if vm == nil {
+				return cty.NilVal, false
+			}
+			v, ok := vm[st.Name]
+			if !ok {
+				return cty.NilVal, false
+			}
+			val = v
+		case hcl.TraverseIndex:
+			if !val.IsKnown() || val.IsNull() {
+				return cty.NilVal, false
+			}
+			if st.Key.Type() == cty.String {
+				vm := val.AsValueMap()
+				if vm == nil {
+					return cty.NilVal, false
+				}
+				v, ok := vm[st.Key.AsString()]
+				if !ok {
+					return cty.NilVal, false
+				}
+				val = v
+				continue
+			}
+			if st.Key.Type() == cty.Number {
+				i, acc := st.Key.AsBigFloat().Int64()
+				if acc != big.Exact || i < 0 {
+					return cty.NilVal, false
+				}
+				vs := val.AsValueSlice()
+				if int(i) >= len(vs) {
+					return cty.NilVal, false
+				}
+				val = vs[i]
+				continue
+			}
+			return cty.NilVal, false
+		default:
 			return cty.NilVal, false
 		}
-		vm := val.AsValueMap()
-		if vm == nil {
-			return cty.NilVal, false
-		}
-		v, ok := vm[attr.Name]
-		if !ok {
-			return cty.NilVal, false
-		}
-		val = v
 	}
 	return val, true
 }

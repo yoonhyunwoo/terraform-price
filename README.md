@@ -57,7 +57,9 @@ Regions: `ap-northeast-2/1/3` · `ap-southeast-1/2` · `us-east-1` · `us-west-2
 
 - **Price cache** — 7 days at `$UserCacheDir/terraform-price/prices.json`. The cache key omits the AWS profile: OnDemand list prices are public, so one file serves every profile. Delete the file to force a full refresh.
 - **Variable resolution** — reads only `terraform.tfvars` and `locals.tf`. Not `*.auto.tfvars`, `terraform.tfvars.json`, `-var` / `-var-file`, or `TF_VAR_*`; affected resources print as unresolved.
-- **RDS Proxy vCPU** — derived from instance-class naming, following current-generation classes (t3/t4g/r/m). Legacy t2 targets may differ.
+- **count / for_each** — a resolvable `count` or literal `for_each` multiplies the estimate (`× N` in the spec column); unresolvable ones are priced as one and flagged inline.
+- **Modules** — module blocks are listed under Unsupported; their contents are not expanded.
+- **RDS Proxy vCPU** — derived from instance-class naming (current-gen and legacy t2).
 
 ## License
 

@@ -3,6 +3,7 @@ package mapper
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -220,6 +221,8 @@ func TestClassVCPU(t *testing.T) {
 		"db.t3.micro": 2, "db.t3.medium": 2, "db.r6i.large": 2,
 		"db.r8g.xlarge": 4, "db.r5.2xlarge": 8, "db.r6g.4xlarge": 16,
 		"db.m5.24xlarge": 96,
+		"db.t2.micro":    1, "db.t2.small": 1, "db.t2.medium": 2,
+		"db.t2.xlarge": 4, "db.t2.2xlarge": 8,
 	}
 	for class, want := range cases {
 		got, ok := classVCPU(class)
@@ -273,5 +276,18 @@ resource "aws_vpc" "v" {}
 		if kind != KindFree || spec != nil {
 			t.Errorf("%s: want KindFree/nil-spec, got kind=%v spec=%v note=%q", r.Type, kind, spec, note)
 		}
+	}
+}
+
+func TestModuleBlockSurfacedAsUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "m.tf", `module "db" { source = "./modules/rds" }`)
+	rs, err := parser.ParseDir(dir)
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("parse: %v %+v", err, rs)
+	}
+	kind, spec, note := MapResource(rs[0], resolver.NewResolver(dir), idxOf(rs), "ap-northeast-2")
+	if kind != KindUnsupported || spec != nil || !strings.Contains(note, "module") {
+		t.Fatalf("module: want Unsupported/nil-spec/module note, got kind=%v spec=%v note=%q", kind, spec, note)
 	}
 }

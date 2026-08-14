@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	ptypes "github.com/aws/aws-sdk-go-v2/service/pricing/types"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
-	ptypes "github.com/aws/aws-sdk-go-v2/service/pricing/types"
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
@@ -48,43 +48,44 @@ var infoTypes = map[string]string{
 	"aws_vpn_connection":          "VPN connection — hourly (usagetype unsupported)",
 	"aws_kms_key":                 "KMS key — $1/month flat (Price List unit needs live confirmation)",
 	"aws_route53_zone":            "Route53 hosted zone — $0.50/month global (price needs live confirmation)",
+	"module":                      "module block — contents not parsed, resources inside are not estimated",
 	"aws_fsx_windows_file_system": "FSx Windows — GB-month (only Lustre is priced)",
 	"aws_fsx_ontap_file_system":   "FSx ONTAP — GB-month (only Lustre is priced)",
 	"aws_fsx_openzfs_file_system": "FSx OpenZFS — GB-month (only Lustre is priced)",
 }
 
 var freeTypes = map[string]struct{}{
-	"aws_iam_role":                {},
-	"aws_iam_policy":              {},
-	"aws_iam_policy_attachment":   {},
-	"aws_iam_user":                {},
-	"aws_iam_group":               {},
-	"aws_iam_instance_profile":    {},
-	"aws_iam_access_key":          {},
-	"aws_security_group":          {},
-	"aws_security_group_rule":     {},
-	"aws_vpc":                     {},
-	"aws_subnet":                  {},
-	"aws_route_table":             {},
-	"aws_route":                   {},
-	"aws_route_table_association": {},
-	"aws_internet_gateway":        {},
-	"aws_network_acl":             {},
-	"aws_network_acl_rule":        {},
-	"aws_network_interface":       {},
-	"aws_db_subnet_group":         {},
-	"aws_iam_role_policy_attachment":       {},
-	"aws_iam_role_policy":                  {},
-	"aws_rds_cluster_parameter_group":      {},
-	"aws_db_parameter_group":               {},
-	"aws_db_option_group":                  {},
-	"aws_db_proxy_default_target_group":    {},
-	"aws_db_proxy_target":                  {},
-	"aws_secretsmanager_secret_version":    {},
-	"random_password":                      {},
-	"random_string":                        {},
-	"random_id":                            {},
-	"null_resource":                        {},
+	"aws_iam_role":                      {},
+	"aws_iam_policy":                    {},
+	"aws_iam_policy_attachment":         {},
+	"aws_iam_user":                      {},
+	"aws_iam_group":                     {},
+	"aws_iam_instance_profile":          {},
+	"aws_iam_access_key":                {},
+	"aws_security_group":                {},
+	"aws_security_group_rule":           {},
+	"aws_vpc":                           {},
+	"aws_subnet":                        {},
+	"aws_route_table":                   {},
+	"aws_route":                         {},
+	"aws_route_table_association":       {},
+	"aws_internet_gateway":              {},
+	"aws_network_acl":                   {},
+	"aws_network_acl_rule":              {},
+	"aws_network_interface":             {},
+	"aws_db_subnet_group":               {},
+	"aws_iam_role_policy_attachment":    {},
+	"aws_iam_role_policy":               {},
+	"aws_rds_cluster_parameter_group":   {},
+	"aws_db_parameter_group":            {},
+	"aws_db_option_group":               {},
+	"aws_db_proxy_default_target_group": {},
+	"aws_db_proxy_target":               {},
+	"aws_secretsmanager_secret_version": {},
+	"random_password":                   {},
+	"random_string":                     {},
+	"random_id":                         {},
+	"null_resource":                     {},
 }
 
 type Spec struct {
@@ -446,7 +447,7 @@ func mapDBProxy(r *parser.Resource, res *resolver.Resolver, idx map[string]*pars
 	return &Spec{Label: "RDS Proxy", Rates: []Rate{{
 		Label: "vCPU", ServiceCode: "AmazonRDS",
 		Filters:    filters,
-		PreferUnit:  "Hrs", DisplayUnit: "vCPU-hour",
+		PreferUnit: "Hrs", DisplayUnit: "vCPU-hour",
 	}}}, "RDS Proxy — target vCPU unresolved, monthly ≈ unit price × vCPU count × 730", true
 }
 
@@ -491,9 +492,18 @@ func classVCPU(class string) (int, bool) {
 	if len(parts) < 3 {
 		return 0, false
 	}
-	switch size := parts[len(parts)-1]; size {
+	size := parts[len(parts)-1]
+	if strings.HasPrefix(class, "t2.") || strings.HasPrefix(class, "db.t2.") {
+		switch size {
+		case "nano", "micro", "small":
+			return 1, true
+		case "medium", "large":
+			return 2, true
+		}
+	}
+	switch size {
 	case "nano", "micro", "small", "medium", "large":
-		return 2, true // ponytail: current-gen (t3/t4g/r/m) large-and-below = 2 vCPU; legacy t2 differs, add a map if t2 targets appear
+		return 2, true
 	case "xlarge":
 		return 4, true
 	default:

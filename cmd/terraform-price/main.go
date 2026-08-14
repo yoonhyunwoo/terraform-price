@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/price"
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
+	"github.com/zclconf/go-cty/cty"
 )
 
 func main() {
@@ -84,6 +86,18 @@ func main() {
 			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: note})
 			continue
 		}
+		n, metaNote := metaCount(r, res)
+		if n == 0 {
+			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "count = 0 — resource not created"})
+			continue
+		}
+		spec.Count *= n
+		if n > 1 {
+			spec.Label = fmt.Sprintf("%s × %d", spec.Label, n)
+		}
+		if metaNote != "" {
+			spec.Label += " (" + metaNote + ")"
+		}
 		p, unit, err := pricer.UnitPrice(ctx, spec.ServiceCode, spec.Filters, spec.PreferUnit)
 		if err != nil {
 			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "price lookup failed: " + err.Error()})
@@ -134,4 +148,25 @@ func classifyItem(kind mapper.Kind, addr, typ, note string) output.CostItem {
 	default:
 		return output.CostItem{Kind: output.Unsupported, Addr: addr, Type: typ, Note: note}
 	}
+}
+
+func metaCount(r *parser.Resource, res *resolver.Resolver) (int, string) {
+	if expr, ok := r.Exprs["count"]; ok {
+		if v, ok := res.ResolveExpr(expr); ok && v.IsKnown() && !v.IsNull() && v.Type() == cty.Number {
+			if n, acc := v.AsBigFloat().Int64(); acc == big.Exact && n >= 0 {
+				return int(n), ""
+			}
+		}
+		return 1, "count unresolved — priced as 1"
+	}
+	if expr, ok := r.Exprs["for_each"]; ok {
+		if v, ok := res.ResolveExpr(expr); ok && v.IsKnown() && !v.IsNull() {
+			t := v.Type()
+			if t.IsListType() || t.IsSetType() || t.IsTupleType() || t.IsMapType() || t.IsObjectType() {
+				return v.LengthInt(), ""
+			}
+		}
+		return 1, "for_each unresolved — priced as 1"
+	}
+	return 1, ""
 }

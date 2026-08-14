@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -30,6 +31,7 @@ func ParseDir(dir string) ([]*Resource, error) {
 		path := filepath.Join(dir, e.Name())
 		f, diags := parser.ParseHCLFile(path)
 		if diags.HasErrors() {
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: %s\n", e.Name(), diags.Error())
 			continue
 		}
 		sbody, ok := f.Body.(*hclsyntax.Body)
@@ -37,14 +39,19 @@ func ParseDir(dir string) ([]*Resource, error) {
 			continue
 		}
 		for _, blk := range sbody.Blocks {
-			if blk.Type != "resource" || len(blk.Labels) != 2 {
+			if blk.Type == "resource" && len(blk.Labels) == 2 {
+				exprs := map[string]hcl.Expression{}
+				collectExprs(blk.Body, "", exprs)
+				resources = append(resources, &Resource{
+					Type: blk.Labels[0], Name: blk.Labels[1], File: e.Name(), Exprs: exprs,
+				})
 				continue
 			}
-			exprs := map[string]hcl.Expression{}
-			collectExprs(blk.Body, "", exprs)
-			resources = append(resources, &Resource{
-				Type: blk.Labels[0], Name: blk.Labels[1], File: e.Name(), Exprs: exprs,
-			})
+			if blk.Type == "module" && len(blk.Labels) == 1 {
+				resources = append(resources, &Resource{
+					Type: "module", Name: blk.Labels[0], File: e.Name(),
+				})
+			}
 		}
 	}
 	return resources, nil
