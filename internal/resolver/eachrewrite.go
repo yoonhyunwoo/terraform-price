@@ -4,6 +4,8 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+
+	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 )
 
 // rewriteEachValue replaces `each.value.X` traversals with null literals.
@@ -81,8 +83,8 @@ func isEachValue(t hcl.Traversal) bool {
 	if len(t) < 2 {
 		return false
 	}
-	root, ok := t[0].(hcl.TraverseRoot)
-	if !ok || root.Name != "each" {
+	root, ok := parser.RootName(t)
+	if !ok || root != "each" {
 		return false
 	}
 	attr, ok := t[1].(hcl.TraverseAttr)

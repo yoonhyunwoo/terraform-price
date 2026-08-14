@@ -190,19 +190,11 @@ func refResource(expr hcl.Expression, idx map[string]*parser.Resource) *parser.R
 	if !ok {
 		return nil
 	}
-	t := hcl.Traversal(ste.Traversal)
-	if len(t) < 2 {
-		return nil
-	}
-	root, ok := t[0].(hcl.TraverseRoot)
+	addr, _, ok := parser.SplitRef(hcl.Traversal(ste.Traversal))
 	if !ok {
 		return nil
 	}
-	name, ok := t[1].(hcl.TraverseAttr)
-	if !ok {
-		return nil
-	}
-	return idx[root.Name+"."+name.Name]
+	return idx[addr]
 }
 
 func ec2InstanceSpec(it, label string, count int) *Spec {
@@ -801,27 +793,25 @@ func resolveResourceRef(expr hcl.Expression, res *resolver.Resolver, idx map[str
 
 func chaseResourceRef(expr hcl.Expression, res *resolver.Resolver, idx map[string]*parser.Resource, visited map[string]bool) *parser.Resource {
 	for _, t := range expr.Variables() {
-		if len(t) < 2 {
+		if addr, _, ok := parser.SplitRef(t); ok {
+			if r, ok := idx[addr]; ok {
+				return r
+			}
 			continue
 		}
-		root, ok := t[0].(hcl.TraverseRoot)
-		if !ok {
+		// local.<name>: follow the local's own expression transitively.
+		root, ok := parser.RootName(t)
+		if !ok || root != "local" || len(t) < 2 {
 			continue
 		}
 		attr, ok := t[1].(hcl.TraverseAttr)
-		if !ok {
+		if !ok || visited[attr.Name] {
 			continue
 		}
-		addr := root.Name + "." + attr.Name
-		if r, ok := idx[addr]; ok {
-			return r
-		}
-		if root.Name == "local" && !visited[attr.Name] {
-			visited[attr.Name] = true
-			if la, ok := res.LocalExpr(attr.Name); ok {
-				if r := chaseResourceRef(la, res, idx, visited); r != nil {
-					return r
-				}
+		visited[attr.Name] = true
+		if la, ok := res.LocalExpr(attr.Name); ok {
+			if r := chaseResourceRef(la, res, idx, visited); r != nil {
+				return r
 			}
 		}
 	}

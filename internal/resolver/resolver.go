@@ -11,6 +11,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/funcs"
+	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 )
 
 type Resolver struct {
@@ -193,10 +194,7 @@ func (r *Resolver) ResolveExpr(expr hcl.Expression) (cty.Value, bool) {
 }
 
 func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
-	if len(t) == 0 {
-		return cty.NilVal, false
-	}
-	root, ok := rootName(t[0])
+	root, ok := parser.RootName(t)
 	if !ok {
 		return cty.NilVal, false
 	}
@@ -205,16 +203,17 @@ func (r *Resolver) resolveTraversal(t hcl.Traversal) (cty.Value, bool) {
 		return navigate(t[1:], cty.ObjectVal(r.vars))
 	case "local":
 		return navigate(t[1:], cty.ObjectVal(r.locals))
-	// Known-unknowns, unresolved by design and reported as such — never guessed:
-	// provider-computed attrs (id/arn/latest_version), data.*, module.*, each.key.
-	case "data", "module", "terraform", "path", "cwd", "each", "count":
+	}
+	if parser.IsScopeRoot(root) {
+		// Known-unknowns, unresolved by design and reported as such —
+		// never guessed: provider-computed attrs (id/arn/latest_version),
+		// data.*, module.*, each.key, self.
 		return cty.NilVal, false
 	}
 	// Resource reference: aws_instance.a.instance_type
-	if len(t) >= 2 {
-		if name, ok := t[1].(hcl.TraverseAttr); ok {
-			return r.resolveResourceTraversal(root, name.Name, t[2:])
-		}
+	if addr, rest, ok := parser.SplitRef(t); ok {
+		typ, name, _ := strings.Cut(addr, ".")
+		return r.resolveResourceTraversal(typ, name, rest)
 	}
 	return cty.NilVal, false
 }
@@ -287,13 +286,6 @@ func setAttr(obj cty.Value, key string, v cty.Value) cty.Value {
 	m[key] = v
 	return cty.ObjectVal(m)
 }
-func rootName(tr hcl.Traverser) (string, bool) {
-	if root, ok := tr.(hcl.TraverseRoot); ok {
-		return root.Name, true
-	}
-	return "", false
-}
-
 func navigate(steps []hcl.Traverser, val cty.Value) (cty.Value, bool) {
 	for _, step := range steps {
 		switch s := step.(type) {

@@ -17,17 +17,6 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
 )
 
-const nonResourceRoot = "var local data module terraform path cwd each count self"
-
-func isNonResourceRoot(name string) bool {
-	for _, n := range strings.Fields(nonResourceRoot) {
-		if name == n {
-			return true
-		}
-	}
-	return false
-}
-
 type RefResolver struct {
 	resources map[string]*parser.Resource
 	res       *resolver.Resolver
@@ -109,18 +98,9 @@ func (r *RefResolver) deps(addr string) []string {
 func addrsInExpr(expr hcl.Expression) []string {
 	var out []string
 	for _, t := range expr.Variables() {
-		if len(t) < 2 {
-			continue
+		if addr, _, ok := parser.SplitRef(t); ok {
+			out = append(out, addr)
 		}
-		root, ok := t[0].(hcl.TraverseRoot)
-		if !ok || isNonResourceRoot(root.Name) {
-			continue
-		}
-		name, ok := t[1].(hcl.TraverseAttr)
-		if !ok {
-			continue
-		}
-		out = append(out, root.Name+"."+name.Name)
 	}
 	return out
 }
@@ -172,20 +152,15 @@ func (r *RefResolver) ResolveResource(addr string) map[string]cty.Value {
 func (r *RefResolver) resolveExpr(expr hcl.Expression, fromAddr string) (cty.Value, bool) {
 	if ste, ok := expr.(*hclsyntax.ScopeTraversalExpr); ok {
 		t := hcl.Traversal(ste.Traversal)
-		if len(t) >= 2 {
-			if root, ok := t[0].(hcl.TraverseRoot); ok && !isNonResourceRoot(root.Name) {
-				if name, ok := t[1].(hcl.TraverseAttr); ok {
-					targetAddr := root.Name + "." + name.Name
-					if targetAddr == fromAddr {
-						return cty.NilVal, false // self-reference
-					}
-					targetAttrs := r.ResolveResource(targetAddr)
-					if targetAttrs == nil {
-						return cty.NilVal, false
-					}
-					return navigateAttrs(targetAttrs, t[2:])
-				}
+		if targetAddr, rest, ok := parser.SplitRef(t); ok {
+			if targetAddr == fromAddr {
+				return cty.NilVal, false // self-reference
 			}
+			targetAttrs := r.ResolveResource(targetAddr)
+			if targetAttrs == nil {
+				return cty.NilVal, false
+			}
+			return navigateAttrs(targetAttrs, rest)
 		}
 	}
 	// Non-traversal expression: build a scope with var/local values plus
