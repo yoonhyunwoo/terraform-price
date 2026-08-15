@@ -19,17 +19,22 @@ Never name the adapter package `aws` or `pricing` — both collide with SDK impo
 ## Region dialect lives in awsprice — compose before the cache
 
 `internal/provider/awsprice/regions.go` owns the AWS region vocabulary: `regionToLocation`,
-`regionToUsagePrefix`, and the `usEast1UnprefixedUsagetypes` exception set. The tables were
-derived from the live Price List API (`GetProducts AmazonEC2`, 2026-08-14) — not from memory —
-because the vendor data has quirks: `eu-central-1`'s location string is `EU (Frankfurt)`, and a
-few us-east-1 product families (Aurora storage, NAT gateway) ship unprefixed usagetypes while
-others (Secrets Manager, RDS Proxy) are `USE1-` prefixed. Mappers carry the neutral region id in
-`Spec.Region` / `Rate.Region` and pass unprefixed usagetype bases; `awsprice.Composer` injects the
-location filter and the usagetype prefix. Wiring order in `buildPricer` is load-bearing: the
-Composer must sit **above** the cache (`NewComposer(NewCached(client))`), never below — the cache
-key is computed from the composed query, and a Composer below the cache would key on region-less
-queries so different regions collide on one entry. `TestBuildPricerComposesBeforeCache` guards
-the ordering; `TestCacheKeyFormatStable` guards the key rendering.
+`regionToUsagePrefix`, and the us-east-1 exception sets. The tables were derived from the
+live Price List API (`GetProducts`, 2026-08-14/15) — not from memory — because the vendor
+data has quirks: `eu-central-1`'s location string is `EU (Frankfurt)`; us-east-1 leaves
+instance/node usage usagetypes UNPREFIXED across RDS, DocDB, Neptune and ElastiCache
+(`usEast1UnprefixedUsagePrefixes`: `InstanceUsage:`, `NodeUsage:`, plus the exact-value
+set for Aurora storage and NAT gateway) while aux rows (Secrets Manager, RDS Proxy,
+ExtendedSupport) stay `USE1-` prefixed; KMS ships the full region code
+(`ap-northeast-2-KMS-Keys`). Mappers carry the neutral region id in `Spec.Region` /
+`Rate.Region` and pass unprefixed usagetype bases; `awsprice.Composer` injects the
+location filter and the usagetype prefix. Wiring order in `buildPricer` is load-bearing:
+the Composer must sit **above** the cache, never below — a Composer below the cache
+would key on region-less queries so different regions collide on one entry.
+`TestBuildPricerComposesBeforeCache` guards the ordering; `TestCacheKeyFormatStable`
+guards the key rendering. DocDB abbreviates multi-xlarge sizes on newer families
+(`db.r5.4xl`) but keeps full names on r4 — `Client.UnitPrice` retries the abbreviated
+spelling when `pickPrice` returns the `errNoPrice` sentinel.
 
 ## Price cache is shared across AWS profiles — keep the profile out of the cache key
 
@@ -73,10 +78,12 @@ addresses fails CI; after an INTENDED change regenerate with
 `go test -run TestConformanceAddresses -conformance-update`. The dollar-level
 comparison lives in `TestConformanceSensor` (`TF_CONFORMANCE_SENSOR=1`,
 manual): live prices vs infracost goldens, advisory only — usage defaults and
-their price snapshot make exact dollars unreliable (baseline 62.5% exact on
-single-component rows after EKS extended support landed; known gaps: docdb
-engine filter). This gate found two real mapping bugs on day one: the gp2
-EBS default and ASG tenancy. EKS extended support prices via
+their price snapshot make exact dollars unreliable (baseline 68.1% exact on
+single-component rows after the DocDB InstanceUsage fix; the remaining
+mismatches are model differences, not bugs: reserved-instance fixtures —
+OnDemand-only is the documented scope — usage.yml-driven quantities, and
+provider-block regions). This gate found two real mapping bugs on day one: the
+gp2 EBS default and ASG tenancy. EKS extended support prices via
 `Spec.FlatPrice` ($0.60/cluster-hr published flat fee — no Price List row
 exists) keyed off `eksStandardSupportEnd` in mapper.go.
 
