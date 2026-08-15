@@ -782,8 +782,8 @@ func mapEBS(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
 	if !ok {
 		return nil, "size unresolved", false
 	}
-	vtype := "gp3"
-	if t, ok := resStr(r, res, "type"); ok {
+	vtype := "gp2" // aws provider schema default; gp3 is only the console default
+	if t, ok := resStr(r, res, "type"); ok && t != "" {
 		vtype = t
 	}
 	return &Spec{
@@ -822,7 +822,25 @@ func mapASG(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.R
 	if count == 0 {
 		return nil, "ASG capacity (desired/min) unresolved", false
 	}
-	return ec2InstanceSpec(it, fmt.Sprintf("%s × %d (ASG)", it, count), count), "", true
+	spec := ec2InstanceSpec(it, fmt.Sprintf("%s × %d (ASG)", it, count), count)
+	// The referenced launch template/configuration carries the tenancy:
+	tenancy := "Shared"
+	if t, ok := resStr(lt, res, "placement_tenancy"); ok && t != "" {
+		tenancy = t
+	} else if t, ok := resStr(lt, res, "placement.tenancy"); ok && t != "" {
+		tenancy = t
+	}
+	if tenancy == "host" {
+		// Legacy dedicated-host instance hours carry no separate tenancy=Host
+		// price row; they bill at the Dedicated rate (per infracost goldens).
+		tenancy = "Dedicated"
+	}
+	for i := range spec.Filters {
+		if spec.Filters[i].Field == "tenancy" {
+			spec.Filters[i] = tm("tenancy", tenancy)
+		}
+	}
+	return spec, "", true
 }
 
 func mapEKSNodeGroup(r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource) (*Spec, string, bool) {

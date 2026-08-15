@@ -60,7 +60,7 @@ func (globalFakePricer) UnitPrice(ctx context.Context, q provider.Query) (float6
 	for _, f := range q.Filters {
 		if f.Field == "usagetype" {
 			switch f.Value {
-			case "ap-northeast-2-KMS-Keys":
+			case "us-east-1-KMS-Keys":
 				return 1.0, "Keys", nil
 			case "HostedZone":
 				return 0.5, "HostedZone", nil
