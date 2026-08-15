@@ -44,6 +44,24 @@ wrong "fix" that duplicates identical prices. TTL is 7 days (`provider.CacheTTL`
 `$UserCacheDir/terraform-price/prices.json` forces a full refresh. The key string format is
 load-bearing (existing cache files must keep hitting) — `TestCacheKeyFormatStable` guards it.
 
+## Bulk price files seed the cache — Query API is the fallback, not the primary
+
+`internal/provider/awsprice/bulk.go` answers cache misses by downloading one Price
+List Bulk API file per (service, region) into `~/.cache/terraform-price/bulk/`
+(gzip, same 7-day TTL) and matching filters against an in-memory index — no
+per-query API round-trips. It sits inside the cache via
+`provider.Fallback{Primary: bulk, Secondary: client}`: ANY bulk failure
+(unknown filter field — `indexFields` allowlist — download error, no match)
+degrades to GetProducts, which also owns the canonical error messages. A stale
+local file beats a failed download (stability first). `selectPrice` replicates
+`pickPrice`'s iteration contract exactly — products and price dimensions in
+file order, first positive price with the preferred unit wins — because
+ambiguous matches would otherwise drift from Query API results; verified by
+byte-identical outputs on the hr corpus. Bulk API service codes differ for two
+services (`AWSKMS`→`awskms`, `AWSWAF`→`awswaf` — `bulkServiceCode`); note BOTH
+APIs require credentials, the old "GetProducts is keyless" belief was wrong
+(ListPriceLists probe, 2026-08-15).
+
 ## Var / locals resolution sources — what is and is not read
 
 `resolver.NewResolver` reads, in order: `terraform.tfvars`, then `*.auto.tfvars`

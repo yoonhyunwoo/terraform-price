@@ -49,8 +49,10 @@ func main() {
 	if !*noCacheFlag {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			cachePath := filepath.Join(home, ".cache", "terraform-price", "prices.json")
-			cacher = provider.NewCached(client, cachePath, priceCacheTTL)
+			cacheDir := filepath.Join(home, ".cache", "terraform-price")
+			bulk := awsprice.NewBulk(client, filepath.Join(cacheDir, "bulk"), priceCacheTTL)
+			inner := provider.Fallback{Primary: bulk, Secondary: client}
+			cacher = provider.NewCached(inner, filepath.Join(cacheDir, "prices.json"), priceCacheTTL)
 			pricer = cacher
 		}
 	}
