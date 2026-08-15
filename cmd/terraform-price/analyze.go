@@ -19,7 +19,9 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
 )
 
-const defaultRegion = "ap-northeast-2"
+// defaultRegion matches the AWS Price List Query API home region and the
+// infracost conformance fixtures, so unit prices line up for comparison.
+const defaultRegion = "us-east-1"
 
 const gatedResourceNote = "count = 0 — resource not created"
 
