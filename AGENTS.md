@@ -62,6 +62,22 @@ services (`AWSKMS`→`awskms`, `AWSWAF`→`awswaf` — `bulkServiceCode`); note 
 APIs require credentials, the old "GetProducts is keyless" belief was wrong
 (ListPriceLists probe, 2026-08-15).
 
+## Conformance gate — vendored infracost fixtures guard parsing regressions
+
+`testdata/conformance/aws/` holds 109 fixture directories vendored from
+infracost (Apache-2.0; see the README there). `TestConformanceAddresses`
+runs the analyzer over each one twice (determinism assertion) with a stub
+pricer and diffs the enumerated resource addresses against
+`testdata/conformance/snapshot.txt`. A parsing change that drops or adds
+addresses fails CI; after an INTENDED change regenerate with
+`go test -run TestConformanceAddresses -conformance-update`. The dollar-level
+comparison lives in `TestConformanceSensor` (`TF_CONFORMANCE_SENSOR=1`,
+manual): live prices vs infracost goldens, advisory only — usage defaults and
+their price snapshot make exact dollars unreliable (baseline 52.8% exact on
+single-component rows; known gaps: docdb engine filter, EKS extended support
+pricing model). This gate found two real mapping bugs on day one: the gp2
+EBS default and ASG tenancy.
+
 ## Var / locals resolution sources — what is and is not read
 
 `resolver.NewResolver` reads, in order: `terraform.tfvars`, then `*.auto.tfvars`
