@@ -107,6 +107,21 @@ var usEast1UnprefixedUsagetypes = map[string]bool{
 	"NatGateway-Hours":                true,
 }
 
+// usEast1UnprefixedUsagePrefixes extends the exception to usagetype families:
+// instance/node usage rows ship unprefixed in us-east-1 across RDS, DocDB,
+// Neptune and ElastiCache (live GetProducts survey, 2026-08-15), while aux
+// rows (ExtendedSupport, Neptune NCU) stay USE1- prefixed.
+var usEast1UnprefixedUsagePrefixes = []string{"InstanceUsage:", "NodeUsage:"}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // compose must run before provider.Cached: the location filter it injects is
 // part of the cache key, so regions never collide on one key.
 func compose(q provider.Query) (provider.Query, error) {
@@ -124,7 +139,8 @@ func compose(q provider.Query) (provider.Query, error) {
 	for _, f := range q.Filters {
 		if f.Field == "usagetype" {
 			switch {
-			case q.Region == "us-east-1" && usEast1UnprefixedUsagetypes[f.Value]:
+			case q.Region == "us-east-1" && usEast1UnprefixedUsagetypes[f.Value],
+				q.Region == "us-east-1" && hasAnyPrefix(f.Value, usEast1UnprefixedUsagePrefixes):
 			case strings.HasPrefix(f.Value, q.Region+"-"):
 				// KMS ships usagetypes prefixed with the region code
 				// (ap-northeast-2-KMS-Keys), not the short form.

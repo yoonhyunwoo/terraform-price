@@ -491,7 +491,9 @@ func auroraEngine(e string) string {
 
 // mapDBInstance prices DocumentDB and Neptune instance classes. Their
 // Price List rows carry instanceType but no deploymentOption attribute
-// (unlike RDS) — adding that filter matches nothing.
+// (unlike RDS) — adding that filter matches nothing. The bare instanceType
+// filter also catches CPUCredits (t3) and IO-Optimized rows, so the
+// usagetype pins the standard InstanceUsage rate.
 func mapDBInstance(r *parser.Resource, res *resolver.Resolver, serviceCode string) (*Spec, string, bool) {
 	ic, ok := resStr(r, res, "instance_class")
 	if !ok {
@@ -499,8 +501,11 @@ func mapDBInstance(r *parser.Resource, res *resolver.Resolver, serviceCode strin
 	}
 	return &Spec{
 		ServiceCode: serviceCode,
-		Filters:     []provider.Filter{tm("instanceType", ic)},
-		UsageQty:    730, Count: 1, Label: ic,
+		Filters: []provider.Filter{
+			tm("instanceType", ic),
+			tm("usagetype", "InstanceUsage:"+ic),
+		},
+		UsageQty: 730, Count: 1, Label: ic,
 	}, "", true
 }
 

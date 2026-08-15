@@ -3,7 +3,9 @@ package awsprice
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -30,6 +32,18 @@ func NewClient(ctx context.Context) (*Client, error) {
 }
 
 func (c *Client) UnitPrice(ctx context.Context, q provider.Query) (float64, string, error) {
+	p, unit, err := c.query(ctx, q)
+	if errors.Is(err, errNoPrice) {
+		// DocDB/Neptune abbreviate multi-xlarge sizes on newer families
+		// (db.r5.4xl) while r4 keeps full names — retry the abbreviated form.
+		if alt, ok := abbrevUsagetype(q); ok {
+			p, unit, err = c.query(ctx, alt)
+		}
+	}
+	return p, unit, err
+}
+
+func (c *Client) query(ctx context.Context, q provider.Query) (float64, string, error) {
 	filters := make([]ptypes.Filter, len(q.Filters))
 	for i, f := range q.Filters {
 		filters[i] = ptypes.Filter{
@@ -47,6 +61,29 @@ func (c *Client) UnitPrice(ctx context.Context, q provider.Query) (float64, stri
 	}
 	return pickPrice(out.PriceList, q.Service, q.PreferUnit)
 }
+
+var multiXlarge = regexp.MustCompile(`^(.*\.\d+)xlarge$`)
+
+// abbrevUsagetype rewrites the usagetype's multi-xlarge size to the
+// abbreviated form (db.r5.4xlarge -> db.r5.4xl).
+func abbrevUsagetype(q provider.Query) (provider.Query, bool) {
+	alt := q
+	alt.Filters = append([]provider.Filter(nil), q.Filters...)
+	for i, f := range alt.Filters {
+		if f.Field != "usagetype" {
+			continue
+		}
+		if m := multiXlarge.FindStringSubmatch(f.Value); m != nil {
+			alt.Filters[i].Value = m[1] + "xl"
+			return alt, true
+		}
+	}
+	return q, false
+}
+
+// errNoPrice marks a query that matched no positive OnDemand price, letting
+// callers retry alternate usagetype spellings.
+var errNoPrice = errors.New("no price match")
 
 type priceListDoc struct {
 	Terms struct {
@@ -85,7 +122,7 @@ func pickPrice(rows []string, serviceCode, preferUnit string) (float64, string, 
 		}
 	}
 	if firstUnit == "" {
-		return 0, "", fmt.Errorf("no price match")
+		return 0, "", errNoPrice
 	}
 	if preferUnit != "" {
 		return 0, "", fmt.Errorf("no OnDemand price with unit %q for %s (available unit: %s)", preferUnit, serviceCode, firstUnit)

@@ -485,3 +485,19 @@ func TestMapEKSClusterExtendedSupport(t *testing.T) {
 		}
 	}
 }
+
+// The bare instanceType filter matches CPUCredits (t3) and IO-Optimized rows
+// too; the usagetype filter pins the standard InstanceUsage rate (live probe:
+// db.t3.medium DocDB rows 0.078 Hrs / 0.0858 IO-Opt / 0.09 vCPU-Hours).
+func TestMapDBInstancePinsInstanceUsage(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "db.tf", "resource \"aws_docdb_cluster_instance\" \"i\" {\n  instance_class = \"db.t3.medium\"\n}")
+	rs, _ := parser.ParseDir(dir)
+	_, spec, note := MapResource(rs[0], resolver.NewResolver(dir), idxOf(rs), "us-east-1")
+	if spec == nil {
+		t.Fatal(note)
+	}
+	if got := filterVal(spec, "usagetype"); got != "InstanceUsage:db.t3.medium" {
+		t.Fatalf("usagetype filter = %q, want InstanceUsage:db.t3.medium", got)
+	}
+}
