@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/mapper"
@@ -37,6 +38,9 @@ func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.
 	if v, ok := ds.res.VarString("aws_region"); ok {
 		region = v
 	}
+	if v := ds.providerRegion(""); v != "" {
+		region = v // the default aws provider block beats the var heuristic
+	}
 	// Registration must precede parent evaluation: outputs compute lazily
 	// on first reference, so earlier resolution would miss them.
 	ds.registerModules(dir, region, "", 0)
@@ -44,10 +48,29 @@ func analyze(ctx context.Context, pricer provider.Pricer, dir string) ([]output.
 	return priceDir(ctx, pricer, ds, region, "")
 }
 
+// providerRegion resolves an aliased aws provider block's region ("" = the
+// default provider); empty when absent or unresolvable.
+func (ds *dirScope) providerRegion(alias string) string {
+	for _, p := range ds.provs {
+		if p.Name != alias {
+			continue
+		}
+		e, ok := p.Exprs["region"]
+		if !ok {
+			continue
+		}
+		if v, ok := ds.res.ResolveExpr(e); ok && v.Type() == cty.String {
+			return v.AsString()
+		}
+	}
+	return ""
+}
+
 type dirScope struct {
 	res        *resolver.Resolver
 	plain      []*parser.Resource
 	mods       []*parser.Resource
+	provs      []*parser.Resource
 	idx        map[string]*parser.Resource
 	rr         *refs.RefResolver
 	countBased map[string]bool
@@ -64,6 +87,10 @@ func buildDirScope(dir string, inputs map[string]cty.Value) (*dirScope, error) {
 	for _, r := range resources {
 		if r.Type == "module" {
 			ds.mods = append(ds.mods, r)
+			continue
+		}
+		if r.Type == "provider" {
+			ds.provs = append(ds.provs, r)
 			continue
 		}
 		ds.plain = append(ds.plain, r)
@@ -298,7 +325,7 @@ func evalOutputs(dir string, res *resolver.Resolver) map[string]cty.Value {
 }
 
 func priceDir(ctx context.Context, pricer provider.Pricer, ds *dirScope, region, prefix string) ([]output.CostItem, error) {
-	items, err := priceResources(ctx, pricer, ds.plain, ds.res, ds.idx, region, prefix)
+	items, err := priceResources(ctx, pricer, ds, ds.plain, region, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -339,11 +366,12 @@ func localModuleDir(dir, src string) string {
 	return modDir
 }
 
-func priceResources(ctx context.Context, pricer provider.Pricer, resources []*parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, region, prefix string) ([]output.CostItem, error) {
+func priceResources(ctx context.Context, pricer provider.Pricer, ds *dirScope, resources []*parser.Resource, region, prefix string) ([]output.CostItem, error) {
 	var items []output.CostItem
 	for _, r := range resources {
 		addr := prefix + r.Type + "." + r.Name
-		if each, ok := forEachItems(r, res); ok {
+		rowRegion := resourceRegion(ds, r, region)
+		if each, ok := forEachItems(r, ds.res); ok {
 			if len(each) == 0 {
 				items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: gatedResourceNote})
 				continue
@@ -351,9 +379,9 @@ func priceResources(ctx context.Context, pricer provider.Pricer, resources []*pa
 			// Expand per for_each key with `each` bound so item attrs
 			// (instance_types = each.value.node_instance_types) resolve.
 			for _, it := range each {
-				res.SetResourceEach(it.keyVal, it.val)
-				row := priceOneResource(ctx, pricer, r, res, idx, region, fmt.Sprintf("%s[%q]", addr, it.key), 1, "")
-				res.ClearResourceEach()
+				ds.res.SetResourceEach(it.keyVal, it.val)
+				row := priceOneResource(ctx, pricer, r, ds.res, ds.idx, rowRegion, fmt.Sprintf("%s[%q]", addr, it.key), 1, "")
+				ds.res.ClearResourceEach()
 				items = append(items, row...)
 			}
 			continue
@@ -361,14 +389,35 @@ func priceResources(ctx context.Context, pricer provider.Pricer, resources []*pa
 		// count/for_each = 0 gates everything: the resource is not created,
 		// so resolution failures below are moot. metaCount returns a note
 		// whenever it falls back to 1, so n == 0 always means a resolved 0.
-		n, metaNote := metaCount(r, res)
+		n, metaNote := metaCount(r, ds.res)
 		if n == 0 {
 			items = append(items, output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: gatedResourceNote})
 			continue
 		}
-		items = append(items, priceOneResource(ctx, pricer, r, res, idx, region, addr, n, metaNote)...)
+		items = append(items, priceOneResource(ctx, pricer, r, ds.res, ds.idx, rowRegion, addr, n, metaNote)...)
 	}
 	return items, nil
+}
+
+// resourceRegion overrides the dir's base region when the resource pins an
+// aliased provider (provider = aws.ue2) whose block carries its own region.
+func resourceRegion(ds *dirScope, r *parser.Resource, base string) string {
+	e, ok := r.Exprs["provider"]
+	if !ok {
+		return base
+	}
+	tr, diags := hcl.AbsTraversalForExpr(e)
+	if diags.HasErrors() || len(tr) < 2 {
+		return base
+	}
+	attr, ok := tr[1].(hcl.TraverseAttr)
+	if !ok {
+		return base
+	}
+	if v := ds.providerRegion(attr.Name); v != "" {
+		return v
+	}
+	return base
 }
 
 func priceOneResource(ctx context.Context, pricer provider.Pricer, r *parser.Resource, res *resolver.Resolver, idx map[string]*parser.Resource, region, addr string, n int, metaNote string) []output.CostItem {

@@ -653,7 +653,9 @@ func mapElastiCache(r *parser.Resource, res *resolver.Resolver) (*Spec, string, 
 		}
 	}
 	if count == 1 {
-		for _, k := range []string{"num_cache_clusters", "number_of_cache_clusters"} {
+		// aws_elasticache_cluster counts nodes via num_cache_nodes; the
+		// replication group family uses num_cache_clusters.
+		for _, k := range []string{"num_cache_nodes", "num_cache_clusters", "number_of_cache_clusters"} {
 			if n, ok := resNum(r, res, k); ok && n > 0 {
 				count = int(n)
 				break
@@ -665,6 +667,9 @@ func mapElastiCache(r *parser.Resource, res *resolver.Resolver) (*Spec, string, 
 		Filters: []provider.Filter{
 			tm("instanceType", nt),
 			tm("cacheEngine", engine),
+			// Bare instanceType also matches ExtendedSupport and
+			// SyncDurability (Valkey) rows; NodeUsage pins the base rate.
+			tm("usagetype", "NodeUsage:"+nt),
 		},
 		UsageQty: 730, Count: count, Label: fmt.Sprintf("%s × %d nodes", nt, count),
 	}, "", true

@@ -54,6 +54,20 @@ func ParseDir(dir string) ([]*Resource, error) {
 				})
 				continue
 			}
+			if blk.Type == "provider" && len(blk.Labels) >= 1 {
+				exprs := map[string]hcl.Expression{}
+				for name, attr := range blk.Body.Attributes {
+					exprs[name] = attr.Expr
+				}
+				alias := ""
+				if len(blk.Labels) == 2 {
+					alias = blk.Labels[1]
+				}
+				resources = append(resources, &Resource{
+					Type: "provider", Name: alias, Exprs: exprs,
+				})
+				continue
+			}
 			if blk.Type == "module" && len(blk.Labels) == 1 {
 				exprs := map[string]hcl.Expression{}
 				for name, attr := range blk.Body.Attributes {
