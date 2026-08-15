@@ -12,7 +12,7 @@ import (
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider/awsprice"
-	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
 )
 
 const priceCacheTTL = 7 * 24 * time.Hour

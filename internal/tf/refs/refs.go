@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Package refres resolves cross-resource references with cycle detection
+// Package refs resolves cross-resource references with cycle detection
 // up front (Verify) and lazy memoized resolution at lookup.
-package refres
+package refs
 
 import (
 	"fmt"
@@ -11,9 +11,9 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/yoonhyunwoo/terraform-price/internal/parser"
-	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
-	"github.com/yoonhyunwoo/terraform-price/internal/tffuncs"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/funcs"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
 )
 
 type RefResolver struct {
@@ -154,7 +154,7 @@ func (r *RefResolver) resolveExpr(expr hcl.Expression, fromAddr string) (cty.Val
 		}
 	}
 	vars, locals := r.res.ValueMaps()
-	ctx := tffuncs.EvalScope(vars, locals)
+	ctx := funcs.EvalScope(vars, locals)
 	need := map[string]map[string]cty.Value{}
 	for _, addr := range addrsInExpr(expr) {
 		if addr == fromAddr {

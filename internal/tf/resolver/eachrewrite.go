@@ -5,7 +5,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/yoonhyunwoo/terraform-price/internal/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/parser"
 )
 
 // rewriteEachValue neutralizes each.value.X: coalesce/lookup args become

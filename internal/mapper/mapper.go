@@ -9,9 +9,9 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider"
-	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
 )
 
 type Kind int

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Package tffuncs implements the Terraform built-in function table
+// Package funcs implements the Terraform built-in function table
 // (Table) and the expression scope that carries it (EvalScope). hcl
 // parses and evaluates expressions but ships no Terraform functions —
 // this package is that missing layer, overlaying cty stdlib where the
 // semantics match and reimplementing where they diverge (length on
 // objects, tuple-to-set coercion).
-package tffuncs
+package funcs
 
 import (
 	"fmt"

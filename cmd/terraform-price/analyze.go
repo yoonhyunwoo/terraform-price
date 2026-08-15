@@ -13,10 +13,10 @@ import (
 
 	"github.com/yoonhyunwoo/terraform-price/internal/mapper"
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
-	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider"
-	"github.com/yoonhyunwoo/terraform-price/internal/refres"
-	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/refs"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
 )
 
 const defaultRegion = "ap-northeast-2"
@@ -47,7 +47,7 @@ type dirScope struct {
 	plain      []*parser.Resource
 	mods       []*parser.Resource
 	idx        map[string]*parser.Resource
-	rr         *refres.RefResolver
+	rr         *refs.RefResolver
 	countBased map[string]bool
 	children   []*moduleInstance
 }
@@ -67,7 +67,7 @@ func buildDirScope(dir string, inputs map[string]cty.Value) (*dirScope, error) {
 		ds.plain = append(ds.plain, r)
 	}
 	ds.idx = parser.Index(ds.plain)
-	ds.rr = refres.New(ds.plain, res)
+	ds.rr = refs.New(ds.plain, res)
 	// A reference cycle (e.g. a self depends_on) degrades the members to
 	// unresolved attributes — ResolveResource's re-entry guard keeps this
 	// terminating — instead of aborting the whole directory.

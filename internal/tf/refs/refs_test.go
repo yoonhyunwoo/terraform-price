@@ -1,12 +1,12 @@
-package refres
+package refs
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/yoonhyunwoo/terraform-price/internal/parser"
-	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
 )
 
 func setup(t *testing.T, files map[string]string) *RefResolver {

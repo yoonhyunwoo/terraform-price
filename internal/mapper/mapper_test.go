@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yoonhyunwoo/terraform-price/internal/parser"
-	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
 )
 
 func writeFile(t *testing.T, dir, name, body string) {

@@ -10,10 +10,10 @@ import (
 
 	"github.com/yoonhyunwoo/terraform-price/internal/mapper"
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
-	"github.com/yoonhyunwoo/terraform-price/internal/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider/awsprice"
-	"github.com/yoonhyunwoo/terraform-price/internal/resolver"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/parser"
+	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
 )
 
 func TestClassifyItemWiring(t *testing.T) {
