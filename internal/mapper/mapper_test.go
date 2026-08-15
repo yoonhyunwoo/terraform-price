@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yoonhyunwoo/terraform-price/internal/tf/parser"
 	"github.com/yoonhyunwoo/terraform-price/internal/tf/resolver"
@@ -437,6 +438,50 @@ func TestMapDBInstanceNoDeploymentOption(t *testing.T) {
 			if f.Field == "deploymentOption" {
 				t.Errorf("%s: deploymentOption filter present, matches nothing in the price list", typ)
 			}
+		}
+	}
+}
+
+// EKS clusters bill $0.60/cluster-hr once their Kubernetes version passes the
+// end of standard support and the upgrade policy is EXTENDED (the default);
+// STANDARD policy auto-upgrades before extended support starts.
+func TestMapEKSClusterExtendedSupport(t *testing.T) {
+	orig := eksNow
+	t.Cleanup(func() { eksNow = orig })
+	eksNow = func() time.Time { return time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC) }
+
+	cases := []struct {
+		name      string
+		body      string
+		wantFlat  bool
+		wantLabel string
+	}{
+		{"unset version", "", false, "EKS control plane"},
+		{"standard version", "version = \"1.34\"", false, "EKS control plane"},
+		{"unknown version", "version = \"1.99\"", false, "EKS control plane"},
+		{"extended", "version = \"1.31\"", true, "extended support"},
+		{"past extended EOL", "version = \"1.23\"", true, "past extended EOL"},
+		{"standard policy", "version = \"1.31\"\n  upgrade_policy { support_type = \"STANDARD\" }", false, "EKS control plane"},
+	}
+	for _, tc := range cases {
+		dir := t.TempDir()
+		writeFile(t, dir, "eks.tf", "resource \"aws_eks_cluster\" \"c\" {\n"+tc.body+"\n}")
+		rs, _ := parser.ParseDir(dir)
+		if len(rs) == 0 {
+			t.Fatalf("%s: parse failed", tc.name)
+		}
+		_, spec, note := MapResource(rs[0], resolver.NewResolver(dir), idxOf(rs), "us-east-1")
+		if spec == nil {
+			t.Fatalf("%s: %v", tc.name, note)
+		}
+		if tc.wantFlat && spec.FlatPrice == nil {
+			t.Errorf("%s: want flat extended price, got nil (label %q)", tc.name, spec.Label)
+		}
+		if !tc.wantFlat && spec.FlatPrice != nil {
+			t.Errorf("%s: want API price, got flat %v", tc.name, *spec.FlatPrice)
+		}
+		if !strings.Contains(spec.Label, tc.wantLabel) {
+			t.Errorf("%s: label %q missing %q", tc.name, spec.Label, tc.wantLabel)
 		}
 	}
 }

@@ -404,6 +404,14 @@ func priceOneResource(ctx context.Context, pricer provider.Pricer, r *parser.Res
 }
 
 func pricedItem(ctx context.Context, pricer provider.Pricer, addr, typ string, spec *mapper.Spec) output.CostItem {
+	if spec.FlatPrice != nil {
+		// Published flat fee with no Price List row (e.g. EKS extended support).
+		return output.CostItem{
+			Kind: output.Fixed, Addr: addr, Type: typ, Spec: spec.Label,
+			UnitPrice: *spec.FlatPrice, Unit: "Hours",
+			Monthly: *spec.FlatPrice * spec.UsageQty * float64(spec.Count),
+		}
+	}
 	p, unit, err := pricer.UnitPrice(ctx, provider.Query{Service: spec.ServiceCode, Region: spec.Region, Filters: spec.Filters, PreferUnit: spec.PreferUnit})
 	if err != nil {
 		return output.CostItem{Kind: output.Fixed, Addr: addr, Unresolved: "price lookup failed: " + err.Error()}

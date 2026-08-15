@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
@@ -104,6 +105,9 @@ type Spec struct {
 	Note       string
 	PreferUnit string
 	Rates      []Rate
+	// FlatPrice bypasses the price APIs for published flat fees that carry
+	// no Price List row (EKS extended support).
+	FlatPrice *float64
 }
 
 type Rate struct {
@@ -251,7 +255,7 @@ func MapResource(r *parser.Resource, res *resolver.Resolver, idx map[string]*par
 	case "aws_msk_cluster":
 		spec, note, ok = mapMSK(r, res)
 	case "aws_eks_cluster":
-		spec, note, ok = flatHourly("AmazonEKS", "AmazonEKS-Hours:perCluster", "EKS control plane"), "", true
+		spec, note, ok = mapEKSCluster(r, res)
 	case "aws_vpn_connection":
 		spec, note, ok = flatHourly("AmazonVPC", "VPN-Usage-Hours:ipsec.1", "VPN connection"), "", true
 	case "aws_ec2_transit_gateway_vpc_attachment":
@@ -570,6 +574,54 @@ func flatHourly(serviceCode, usagetype, label string) *Spec {
 		Filters:     []provider.Filter{tm("usagetype", usagetype)},
 		UsageQty:    730, Count: 1, Label: label,
 	}
+}
+
+// eksStandardSupportEnd maps each Kubernetes minor version to its EKS end of
+// standard support (AWS EKS lifecycle table, 2026-08). Extended support runs
+// 12 more months, after which AWS force-upgrades the cluster.
+var eksStandardSupportEnd = map[string]time.Time{
+	"1.23": time.Date(2023, 10, 11, 0, 0, 0, 0, time.UTC),
+	"1.24": time.Date(2024, 1, 31, 0, 0, 0, 0, time.UTC),
+	"1.25": time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC),
+	"1.26": time.Date(2024, 6, 11, 0, 0, 0, 0, time.UTC),
+	"1.27": time.Date(2024, 7, 24, 0, 0, 0, 0, time.UTC),
+	"1.28": time.Date(2024, 11, 26, 0, 0, 0, 0, time.UTC),
+	"1.29": time.Date(2025, 3, 23, 0, 0, 0, 0, time.UTC),
+	"1.30": time.Date(2025, 7, 23, 0, 0, 0, 0, time.UTC),
+	"1.31": time.Date(2025, 11, 26, 0, 0, 0, 0, time.UTC),
+	"1.32": time.Date(2026, 3, 23, 0, 0, 0, 0, time.UTC),
+	"1.33": time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC),
+	"1.34": time.Date(2026, 12, 2, 0, 0, 0, 0, time.UTC),
+	"1.35": time.Date(2027, 3, 27, 0, 0, 0, 0, time.UTC),
+	"1.36": time.Date(2027, 8, 2, 0, 0, 0, 0, time.UTC),
+}
+
+// eksExtendedHourly is the published extended-support flat rate; the Price
+// List API carries no row for it (standard support stays $0.10/cluster-hr).
+const eksExtendedHourly = 0.60
+
+var eksNow = time.Now // overridable in tests
+
+func mapEKSCluster(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {
+	spec := flatHourly("AmazonEKS", "AmazonEKS-Hours:perCluster", "EKS control plane")
+	ver, _ := resStr(r, res, "version")
+	v := strings.TrimPrefix(ver, "v")
+	eol, known := eksStandardSupportEnd[v]
+	if v == "" || !known || !eksNow().After(eol) {
+		return spec, "", true // standard support rate
+	}
+	if st, ok := resStr(r, res, "upgrade_policy.support_type"); ok && st == "STANDARD" {
+		// STANDARD policy auto-upgrades before extended support kicks in.
+		return spec, "", true
+	}
+	flat := eksExtendedHourly
+	spec.FlatPrice = &flat
+	spec.Label = "EKS control plane (K8s " + v + ", extended support"
+	if eksNow().After(eol.AddDate(0, 12, 0)) {
+		spec.Label += ", past extended EOL"
+	}
+	spec.Label += ")"
+	return spec, "", true
 }
 
 func mapElastiCache(r *parser.Resource, res *resolver.Resolver) (*Spec, string, bool) {

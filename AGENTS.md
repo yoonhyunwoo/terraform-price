@@ -73,10 +73,12 @@ addresses fails CI; after an INTENDED change regenerate with
 `go test -run TestConformanceAddresses -conformance-update`. The dollar-level
 comparison lives in `TestConformanceSensor` (`TF_CONFORMANCE_SENSOR=1`,
 manual): live prices vs infracost goldens, advisory only — usage defaults and
-their price snapshot make exact dollars unreliable (baseline 52.8% exact on
-single-component rows; known gaps: docdb engine filter, EKS extended support
-pricing model). This gate found two real mapping bugs on day one: the gp2
-EBS default and ASG tenancy.
+their price snapshot make exact dollars unreliable (baseline 62.5% exact on
+single-component rows after EKS extended support landed; known gaps: docdb
+engine filter). This gate found two real mapping bugs on day one: the gp2
+EBS default and ASG tenancy. EKS extended support prices via
+`Spec.FlatPrice` ($0.60/cluster-hr published flat fee — no Price List row
+exists) keyed off `eksStandardSupportEnd` in mapper.go.
 
 ## Var / locals resolution sources — what is and is not read
 
