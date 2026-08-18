@@ -43,5 +43,6 @@
   "change_new": "new",
   "change_removed": "removed",
   "prefix_baseline": "baseline ",
-  "prefix_proposed": "proposed "
+  "prefix_proposed": "proposed ",
+  "embedded_catalog": "Some prices come from the bundled catalog (generated {{.Date}})."
 }

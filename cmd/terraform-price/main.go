@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yoonhyunwoo/terraform-price/internal/catalog"
 	"github.com/yoonhyunwoo/terraform-price/internal/delta"
 	"github.com/yoonhyunwoo/terraform-price/internal/i18n"
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
@@ -52,6 +53,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	var embeddedLayer *provider.Embedded
+	embedded, embErr := provider.LoadEmbedded(catalog.Prices, client)
+	if embErr != nil {
+		fmt.Fprintln(os.Stderr, "catalog:", embErr)
+	} else {
+		embeddedLayer = embedded
+	}
 	var pricer provider.Pricer = client
 	var cachers []*provider.Cached
 	if !*noCacheFlag {
@@ -59,7 +67,10 @@ func main() {
 		if err == nil {
 			cacheDir := filepath.Join(home, ".cache", "terraform-price")
 			bulk := awsprice.NewBulk(client, filepath.Join(cacheDir, "bulk"), priceCacheTTL)
-			inner := provider.Fallback{Primary: bulk, Secondary: client}
+			var inner provider.Pricer = provider.Fallback{Primary: bulk, Secondary: client}
+			if embeddedLayer != nil {
+				inner = provider.Fallback{Primary: bulk, Secondary: embedded}
+			}
 			c := provider.NewCached(inner, filepath.Join(cacheDir, "prices.json"), priceCacheTTL)
 			cachers = append(cachers, c)
 			pricer = c
@@ -96,6 +107,11 @@ func main() {
 		} else {
 			delta.WriteMarkdown(os.Stdout, l, *baselineFlag, rows, totals)
 		}
+	}
+
+	if embeddedLayer != nil && embeddedLayer.Hits() > 0 {
+		fmt.Fprintln(os.Stdout, l.T(i18n.MsgEmbeddedCatalog, map[string]interface{}{"Date": strings.TrimSpace(catalog.Date)}))
+		fmt.Fprintln(os.Stdout)
 	}
 
 	for _, c := range cachers {

@@ -51,6 +51,7 @@ const (
 	MsgFreeSection           = "free_section"
 	MsgFixedTotal            = "fixed_total"
 	MsgCaveat                = "caveat"
+	MsgEmbeddedCatalog       = "embedded_catalog"
 	MsgNoResources           = "no_resources"
 	MsgNoPricedChanges       = "no_priced_changes"
 	MsgTotalsLine            = "totals_line"
