@@ -28,6 +28,8 @@ go install github.com/yoonhyunwoo/terraform-price/cmd/terraform-price@latest
 
 Or download a prebuilt binary from [releases](https://github.com/yoonhyunwoo/terraform-price/releases).
 
+For CI, use the [GitHub Action](#github-action) instead.
+
 ## Usage
 
 ```sh
@@ -61,33 +63,39 @@ With `--baseline`, a `Delta vs baseline` section is appended: per-resource prior
 - **Usage-based fees** — data transfer and per-GB processing (e.g. NAT Gateway) are not in the Fixed total; only fixed hourly/GB-month dimensions are.
 - **RDS Proxy vCPU** — derived from instance-class naming (current-gen and legacy t2).
 
-## CI cost gate
+## GitHub Action
+
+Add a cost report to pull requests with one step:
+
 ```yaml
-# .github/workflows/cost-gate.yml
+name: cost
 on: pull_request
 permissions:
   contents: read
-  id-token: write
 jobs:
   cost:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4                    # PR head
-      - uses: actions/checkout@v4                    # merge target
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
-          ref: ${{ github.base_ref }}
-          path: base
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.COST_GATE_ROLE_ARN }}
+          role-to-assume: ${{ secrets.COST_REPORT_ROLE_ARN }}
           aws-region: us-east-1
-      - run: go install github.com/yoonhyunwoo/terraform-price/cmd/terraform-price@main
+      - uses: yoonhyunwoo/terraform-price@v1
+        with:
+          directory: terraform/
+          baseline-ref: ${{ github.base_ref }}
 ```
 
-The gate fails (exit 1) when the signed monthly delta exceeds the threshold; cost decreases always pass. Any AWS credentials work — the Price List API returns public list prices. Changes inside modules that cannot be analyzed (git:: / private sources, unresolved module outputs) surface as not estimated rather than as a number.
+Inputs:
+
+| Input | Default | Description |
+|---|---|---|
+| `directory` | `.` | Terraform directory (PR head already checked out) |
+| `baseline-ref` | — | Ref to diff against; empty skips the delta section |
+| `version` | `latest` | Release tag to install |
+
+The report (and the delta table, when `baseline-ref` is set) is written to the job step summary and the log. Any AWS credentials work — the Price List API returns public list prices. The bulk price files under `~/.cache/terraform-price` are cached between runs. Resources that cannot be analyzed (`git::` / private module sources, unresolved references, price lookups without credentials) surface as not estimated rather than as a number.
 
 ## License
 

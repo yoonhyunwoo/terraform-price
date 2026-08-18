@@ -1,0 +1,55 @@
+name: terraform-price
+description: Estimate the monthly AWS cost of Terraform code, optionally diffed against a baseline ref.
+inputs:
+  directory:
+    description: Directory containing the Terraform files (already checked out).
+    default: "."
+  baseline-ref:
+    description: Ref (branch or tag) to diff against; empty skips the delta report.
+    default: ""
+  version:
+    description: terraform-price release tag; "latest" resolves the newest release.
+    default: "latest"
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      run: |
+        v="${{ inputs.version }}"
+        if [ "$v" = "latest" ]; then
+          v=$(curl -fsSL -H "Authorization: token ${{ github.token }}" \
+            "https://api.github.com/repos/yoonhyunwoo/terraform-price/releases/latest" \
+            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+        fi
+        [ -n "$v" ] || { echo "failed to resolve terraform-price version" >&2; exit 1; }
+        echo "version=$v" >> "$GITHUB_OUTPUT"
+        echo "week=$(date -u +'%G-W%V')" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/terraform-price
+        key: terraform-price-bulk-${{ steps.resolve.outputs.version }}-${{ steps.resolve.outputs.week }}
+        restore-keys: terraform-price-bulk-${{ steps.resolve.outputs.version }}-
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      if: ${{ inputs.baseline-ref != '' }}
+      with:
+        ref: ${{ inputs.baseline-ref }}
+        path: terraform-price-baseline
+        fetch-depth: 1
+    - name: Install terraform-price
+      shell: bash
+      run: |
+        v="${{ steps.resolve.outputs.version }}"
+        base="https://github.com/yoonhyunwoo/terraform-price/releases/download/${v}"
+        curl -fsSL "$base/terraform-price_${v#v}_linux_amd64.tar.gz" -o /tmp/terraform-price.tgz
+        mkdir -p "$RUNNER_TEMP/terraform-price-bin"
+        tar xzf /tmp/terraform-price.tgz -C "$RUNNER_TEMP/terraform-price-bin"
+        echo "$RUNNER_TEMP/terraform-price-bin" >> "$GITHUB_PATH"
+    - name: Run terraform-price
+      shell: bash
+      run: |
+        args=()
+        if [ -n "${{ inputs.baseline-ref }}" ]; then
+          args+=(--baseline "$RUNNER_TEMP/terraform-price-baseline")
+        fi
+        terraform-price "${{ inputs.directory }}" "${args[@]}" | tee "$GITHUB_STEP_SUMMARY"
