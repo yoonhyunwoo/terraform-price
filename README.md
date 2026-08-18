@@ -103,8 +103,7 @@ Without AWS credentials the report still runs; price rows degrade to unresolved.
 prices without giving CI any credentials, generate a price file once from a machine that
 has them, commit it, and point the action at it:
 
-```sh
-terraform-price terraform/ --price-file prices.json   # local, with credentials
+terraform-price --price-file prices.json terraform/   # local, with credentials
 git add prices.json
 ```
 
