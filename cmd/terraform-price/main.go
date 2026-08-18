@@ -20,6 +20,7 @@ const priceCacheTTL = 7 * 24 * time.Hour
 func main() {
 	noCacheFlag := flag.Bool("no-cache", false, "bypass the AWS Price List API price cache")
 	priceFileFlag := flag.String("price-file", "", "JSON price file to seed lookups (same format as the cache, never expires; misses fall through to the network and successful lookups are written back)")
+	formatFlag := flag.String("format", "full", "report format: full (all tables) or compact (CI summary)")
 	baselineFlag := flag.String("baseline", "", "baseline directory to diff against (e.g. a checkout of the merge-target branch)")
 	flag.Parse()
 	dir := "."
@@ -70,9 +71,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "parse:", err)
 		os.Exit(1)
 	}
-
-	output.WriteMarkdown(os.Stdout, service, region, items)
-
+	if *formatFlag != "compact" || *baselineFlag == "" {
+		if *formatFlag == "compact" {
+			output.WriteCompact(os.Stdout, service, region, items)
+		} else {
+			output.WriteMarkdown(os.Stdout, service, region, items)
+		}
+	}
 	if *baselineFlag != "" {
 		baseItems, err := analyze(ctx, pricer, *baselineFlag)
 		if err != nil {
@@ -80,7 +85,11 @@ func main() {
 			os.Exit(1)
 		}
 		rows, totals := delta.Compute(baseItems, items)
-		delta.WriteMarkdown(os.Stdout, *baselineFlag, rows, totals)
+		if *formatFlag == "compact" {
+			delta.WriteCompact(os.Stdout, "baseline", rows, totals)
+		} else {
+			delta.WriteMarkdown(os.Stdout, *baselineFlag, rows, totals)
+		}
 	}
 
 	for _, c := range cachers {

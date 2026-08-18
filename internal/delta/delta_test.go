@@ -162,3 +162,31 @@ func TestWriteMarkdown(t *testing.T) {
 		t.Errorf("empty rows output = %q", buf.String())
 	}
 }
+
+func TestWriteCompact(t *testing.T) {
+	rows := []Row{
+		{Kind: Update, Addr: "aws_instance.web", Change: "t2.micro → t3.medium", Prior: 8.76, Proposed: 30.37, Delta: 21.61},
+		{Kind: Update, Addr: "aws_instance.same", Change: "t3.micro", Prior: 7.59, Proposed: 7.59, Delta: 0},
+		{Kind: NotEstimated, Addr: "aws_s3_bucket.logs", Change: "new", Note: "unresolved (price lookup failed: operation error Pricing: GetProducts, get identity: " + strings.Repeat("x", 300) + ")"},
+	}
+	var buf bytes.Buffer
+	WriteCompact(&buf, "baseline", rows, Totals{Prior: 41.90, Proposed: 63.37, Delta: 21.61, NotEstimated: 1})
+	out := buf.String()
+	for _, want := range []string{
+		"**$41.90/mo → $63.37/mo** (Δ **+21.61/mo**)",
+		"| `aws_instance.web` | t2.micro → t3.medium | 30.37 | +21.61 |",
+		"1 unchanged (not shown) · 1 not estimated",
+		"- `aws_s3_bucket.logs` (new): unresolved (price lookup failed",
+		"<details><summary>not estimated</summary>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "aws_instance.same") {
+		t.Errorf("unchanged row must not be listed:\n%s", out)
+	}
+	if len(out) > 600 {
+		t.Errorf("compact output too long (%d bytes):\n%s", len(out), out)
+	}
+}

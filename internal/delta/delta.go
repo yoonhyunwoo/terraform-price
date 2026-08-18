@@ -180,3 +180,61 @@ func WriteMarkdown(w io.Writer, label string, rows []Row, t Totals) {
 	fmt.Fprintf(w, "\nBaseline $%.2f/mo → Proposed $%.2f/mo (Δ %+.2f, not estimated: %d)\n\n",
 		t.Prior, t.Proposed, t.Delta, t.NotEstimated)
 }
+
+// WriteCompact renders the CI variant: headline delta, one table of changed
+// resources, unchanged rows counted rather than listed.
+func WriteCompact(w io.Writer, label string, rows []Row, t Totals) {
+	fmt.Fprintf(w, "## Delta vs `%s`\n\n", label)
+	fmt.Fprintf(w, "**$%.2f/mo → $%.2f/mo** (Δ **%+.2f/mo**)\n\n", t.Prior, t.Proposed, t.Delta)
+	fmt.Fprintln(w, "| Resource | Change | $/mo | Δ/mo |")
+	fmt.Fprintln(w, "|---|---|---:|---:|")
+	var unchanged, notEstimated int
+	var ne []string
+	for _, r := range rows {
+		switch {
+		case r.Kind == NotEstimated:
+			notEstimated++
+			ne = append(ne, fmt.Sprintf("- `%s` (%s): %s", r.Addr, r.Change, shortNote(r.Note)))
+		case r.Delta == 0:
+			unchanged++
+		default:
+			fmt.Fprintf(w, "| `%s` | %s | %.2f | %+.2f |\n", r.Addr, escCell(r.Change), r.Proposed, r.Delta)
+		}
+	}
+	foot := ""
+	if unchanged > 0 {
+		foot = fmt.Sprintf("%d unchanged (not shown)", unchanged)
+	}
+	if notEstimated > 0 {
+		if foot != "" {
+			foot += " · "
+		}
+		foot += fmt.Sprintf("%d not estimated", notEstimated)
+	}
+	if foot != "" {
+		fmt.Fprintf(w, "\n%s\n", foot)
+	}
+	if len(ne) > 0 {
+		fmt.Fprintln(w, "\n<details><summary>not estimated</summary>")
+		for _, l := range ne {
+			fmt.Fprintln(w, l)
+		}
+		fmt.Fprintln(w, "</details>")
+	}
+}
+
+func escCell(s string) string {
+	return strings.ReplaceAll(s, "|", `\|`)
+}
+
+// shortNote keeps unresolved rows to the meaningful prefix — the full AWS SDK
+// error chain is in the log, not the PR comment.
+func shortNote(note string) string {
+	if s, _, ok := strings.Cut(note, ":"); ok && strings.HasPrefix(note, "unresolved") && len(s) < 40 {
+		return s
+	}
+	if len(note) > 60 {
+		return note[:57] + "…"
+	}
+	return note
+}

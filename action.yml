@@ -13,6 +13,9 @@ inputs:
   version:
     description: terraform-price release tag; "latest" resolves the newest release.
     default: "latest"
+  format:
+    description: Report format — compact (CI summary, default) or full (all tables).
+    default: "compact"
 runs:
   using: composite
   steps:
@@ -58,6 +61,7 @@ runs:
         if [ -n "${{ inputs.price-file }}" ]; then
           args+=(--price-file "${{ inputs.price-file }}")
         fi
+        args+=(--format "${{ inputs.format }}")
         { echo "## terraform-price report"; echo "<!-- terraform-price-report -->"; terraform-price "${args[@]}" "${{ inputs.directory }}"; } | tee "$GITHUB_STEP_SUMMARY" > "$RUNNER_TEMP/terraform-price-report.md"
     - name: Comment on the pull request
       if: ${{ github.event_name == 'pull_request' }}

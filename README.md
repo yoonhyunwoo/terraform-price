@@ -39,7 +39,7 @@ For CI, use the [GitHub Action](#github-action) instead.
 |---|---|---|
 | `--no-cache` | `false` | Bypass the price cache for this run |
 | `--price-file` | — | JSON price file seeding lookups (never expires; misses fall through to the network and hits are written back) |
-| `--baseline` | — | Baseline directory to diff against (delta mode) |
+| `--format` | `full` | `full` (all tables) or `compact` (CI summary) |
 | `[dir]` | `.` | Target Terraform directory (positional) |
 
 Region comes from tfvars `aws_region` (default `ap-northeast-2`). All 39 regions the AWS Price List API covers are supported. The report title comes from tfvars `origin_service_name` (default: directory name).
@@ -97,6 +97,7 @@ Inputs:
 | `baseline-ref` | — | Ref to diff against; empty skips the delta section |
 | `price-file` | — | Committed `prices.json` for credentials-free runs |
 | `version` | `latest` | Release tag to install |
+| `format` | `compact` | `compact` (delta-first CI summary) or `full` (all tables) |
 
 ### Credentials-free runs
 
