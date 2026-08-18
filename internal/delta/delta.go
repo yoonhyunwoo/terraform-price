@@ -162,7 +162,7 @@ func Compute(base, proposed []output.CostItem) ([]Row, Totals) {
 }
 
 func WriteMarkdown(w io.Writer, label string, rows []Row, t Totals) {
-	fmt.Fprintf(w, "## Delta vs baseline (`%s`)\n\n", label)
+	fmt.Fprintf(w, "## Monthly cost change vs `%s`\n\n", label)
 	if len(rows) == 0 {
 		fmt.Fprintln(w, "No priced changes.")
 		fmt.Fprintln(w)
@@ -183,10 +183,17 @@ func WriteMarkdown(w io.Writer, label string, rows []Row, t Totals) {
 
 // WriteCompact renders the CI variant: headline delta, one table of changed
 // resources, unchanged rows counted rather than listed.
-func WriteCompact(w io.Writer, label string, rows []Row, t Totals) {
-	fmt.Fprintf(w, "## Delta vs `%s`\n\n", label)
-	fmt.Fprintf(w, "**$%.2f/mo → $%.2f/mo** (Δ **%+.2f/mo**)\n\n", t.Prior, t.Proposed, t.Delta)
-	fmt.Fprintln(w, "| Resource | Change | $/mo | Δ/mo |")
+func WriteCompact(w io.Writer, rows []Row, t Totals) {
+	fmt.Fprintln(w, "## Monthly cost change")
+	switch {
+	case t.Delta > 0:
+		fmt.Fprintf(w, "**Monthly cost increased by $%.2f/mo** ($%.2f/mo → $%.2f/mo) ↑\n\n", t.Delta, t.Prior, t.Proposed)
+	case t.Delta < 0:
+		fmt.Fprintf(w, "**Monthly cost decreased by $%.2f/mo** ($%.2f/mo → $%.2f/mo) ↓\n\n", -t.Delta, t.Prior, t.Proposed)
+	default:
+		fmt.Fprintf(w, "**No monthly cost change** ($%.2f/mo)\n\n", t.Proposed)
+	}
+	fmt.Fprintln(w, "| Resource | Change | New $/mo | Change $/mo |")
 	fmt.Fprintln(w, "|---|---|---:|---:|")
 	var unchanged, notEstimated int
 	var ne []string

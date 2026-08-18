@@ -86,7 +86,7 @@ func main() {
 		}
 		rows, totals := delta.Compute(baseItems, items)
 		if *formatFlag == "compact" {
-			delta.WriteCompact(os.Stdout, "baseline", rows, totals)
+			delta.WriteCompact(os.Stdout, rows, totals)
 		} else {
 			delta.WriteMarkdown(os.Stdout, *baselineFlag, rows, totals)
 		}

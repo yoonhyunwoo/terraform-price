@@ -146,7 +146,7 @@ func TestWriteMarkdown(t *testing.T) {
 	WriteMarkdown(&buf, "base", rows, Totals{Prior: 41.90, Proposed: 63.37, Delta: 21.61, NotEstimated: 1})
 	out := buf.String()
 	for _, want := range []string{
-		"## Delta vs baseline (`base`)",
+		"## Monthly cost change vs `base`",
 		"| `aws_instance.web` | t2.micro → t3.medium | 8.76 | 30.37 | +21.61 |",
 		"| `aws_s3_bucket.logs` | new | — | — | not estimated: usage-based |",
 		"Baseline $41.90/mo → Proposed $63.37/mo (Δ +21.61, not estimated: 1)",
@@ -170,10 +170,10 @@ func TestWriteCompact(t *testing.T) {
 		{Kind: NotEstimated, Addr: "aws_s3_bucket.logs", Change: "new", Note: "unresolved (price lookup failed: operation error Pricing: GetProducts, get identity: " + strings.Repeat("x", 300) + ")"},
 	}
 	var buf bytes.Buffer
-	WriteCompact(&buf, "baseline", rows, Totals{Prior: 41.90, Proposed: 63.37, Delta: 21.61, NotEstimated: 1})
+	WriteCompact(&buf, rows, Totals{Prior: 41.90, Proposed: 63.37, Delta: 21.61, NotEstimated: 1})
 	out := buf.String()
 	for _, want := range []string{
-		"**$41.90/mo → $63.37/mo** (Δ **+21.61/mo**)",
+		"**Monthly cost increased by $21.61/mo** ($41.90/mo → $63.37/mo) ↑",
 		"| `aws_instance.web` | t2.micro → t3.medium | 30.37 | +21.61 |",
 		"1 unchanged (not shown) · 1 not estimated",
 		"- `aws_s3_bucket.logs` (new): unresolved (price lookup failed",
