@@ -81,7 +81,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.COST_REPORT_ROLE_ARN }}
           aws-region: us-east-1
-      - uses: yoonhyunwoo/terraform-price@v1
+      - uses: yoonhyunwoo/terraform-price@v0
         with:
           directory: terraform/
           baseline-ref: ${{ github.base_ref }}
