@@ -12,8 +12,8 @@ func testQ(service string, field, value string) Query {
 
 func TestEmbeddedHitAndFallback(t *testing.T) {
 	catalog := `{"AmazonEC2|instanceType=t3.medium|Hrs": {"price": 0.0416, "unit": "Hrs", "cached_at": 0}}`
-	var innerErr = errors.New("inner called")
-	inner := stubPricer{err: innerErr}
+	var innerErr = innerErrStub
+	inner := failPricer{}
 	e, err := LoadEmbedded([]byte(catalog), inner)
 	if err != nil {
 		t.Fatal(err)
@@ -45,8 +45,10 @@ func TestEmbeddedKeyIncludesRegionFilter(t *testing.T) {
 	}
 }
 
-type stubPricer struct{ err error }
+type failPricer struct{}
 
-func (s stubPricer) UnitPrice(context.Context, Query) (float64, string, error) {
-	return 0, "", s.err
+func (failPricer) UnitPrice(context.Context, Query) (float64, string, error) {
+	return 0, "", innerErrStub
 }
+
+var innerErrStub = errors.New("inner called")
