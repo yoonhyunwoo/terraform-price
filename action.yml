@@ -53,7 +53,7 @@ runs:
       run: |
         args=()
         if [ -n "${{ inputs.baseline-ref }}" ]; then
-          args+=(--baseline "$RUNNER_TEMP/terraform-price-baseline")
+          args+=(--baseline "terraform-price-baseline/${{ inputs.directory }}")
         fi
         if [ -n "${{ inputs.price-file }}" ]; then
           args+=(--price-file "${{ inputs.price-file }}")
