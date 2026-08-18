@@ -58,4 +58,18 @@ runs:
         if [ -n "${{ inputs.price-file }}" ]; then
           args+=(--price-file "${{ inputs.price-file }}")
         fi
-        terraform-price "${args[@]}" "${{ inputs.directory }}" | tee "$GITHUB_STEP_SUMMARY"
+        { echo "## terraform-price report"; echo "<!-- terraform-price-report -->"; terraform-price "${args[@]}" "${{ inputs.directory }}"; } | tee "$GITHUB_STEP_SUMMARY" > "$RUNNER_TEMP/terraform-price-report.md"
+    - name: Comment on the pull request
+      if: ${{ github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPORT: ${{ runner.temp }}/terraform-price-report.md
+      run: |
+        id=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+          --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- terraform-price-report -->"))) | .id' | head -1)
+        if [ -n "$id" ]; then
+          gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$id" -F body="@$REPORT" >/dev/null
+        else
+          gh api -X POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" -F body="@$REPORT" >/dev/null
+        fi

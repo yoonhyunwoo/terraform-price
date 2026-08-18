@@ -73,6 +73,7 @@ name: cost
 on: pull_request
 permissions:
   contents: read
+  pull-requests: write
 jobs:
   cost:
     runs-on: ubuntu-latest
@@ -119,7 +120,7 @@ The file uses the cache format, never expires, and grows: run the same command l
 whenever a new resource type appears so its prices are added. Lookups missing from the
 file fall through to the network (and degrade to unresolved when CI has no credentials).
 
-The report (and the delta table, when `baseline-ref` is set) is written to the job step summary and the log. Any AWS credentials work — the Price List API returns public list prices. The bulk price files under `~/.cache/terraform-price` are cached between runs. Resources that cannot be analyzed (`git::` / private module sources, unresolved references, price lookups without credentials) surface as not estimated rather than as a number.
+On `pull_request` events the report is also posted as a PR comment (updated in place on re-runs) — the workflow needs `pull-requests: write` for that. The report (and the delta table, when `baseline-ref` is set) is written to the job step summary and the log. Any AWS credentials work — the Price List API returns public list prices. The bulk price files under `~/.cache/terraform-price` are cached between runs. Resources that cannot be analyzed (`git::` / private module sources, unresolved references, price lookups without credentials) surface as not estimated rather than as a number.
 
 ## License
 
