@@ -58,4 +58,4 @@ runs:
         if [ -n "${{ inputs.price-file }}" ]; then
           args+=(--price-file "${{ inputs.price-file }}")
         fi
-        terraform-price "${{ inputs.directory }}" "${args[@]}" | tee "$GITHUB_STEP_SUMMARY"
+        terraform-price "${args[@]}" "${{ inputs.directory }}" | tee "$GITHUB_STEP_SUMMARY"
