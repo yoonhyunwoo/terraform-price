@@ -19,6 +19,7 @@ const priceCacheTTL = 7 * 24 * time.Hour
 
 func main() {
 	noCacheFlag := flag.Bool("no-cache", false, "bypass the AWS Price List API price cache")
+	priceFileFlag := flag.String("price-file", "", "JSON price file to seed lookups (same format as the cache, never expires; misses fall through to the network and successful lookups are written back)")
 	baselineFlag := flag.String("baseline", "", "baseline directory to diff against (e.g. a checkout of the merge-target branch)")
 	flag.Parse()
 	dir := "."
@@ -45,16 +46,22 @@ func main() {
 	}
 
 	var pricer provider.Pricer = client
-	var cacher *provider.Cached
+	var cachers []*provider.Cached
 	if !*noCacheFlag {
 		home, err := os.UserHomeDir()
 		if err == nil {
 			cacheDir := filepath.Join(home, ".cache", "terraform-price")
 			bulk := awsprice.NewBulk(client, filepath.Join(cacheDir, "bulk"), priceCacheTTL)
 			inner := provider.Fallback{Primary: bulk, Secondary: client}
-			cacher = provider.NewCached(inner, filepath.Join(cacheDir, "prices.json"), priceCacheTTL)
-			pricer = cacher
+			c := provider.NewCached(inner, filepath.Join(cacheDir, "prices.json"), priceCacheTTL)
+			cachers = append(cachers, c)
+			pricer = c
 		}
+	}
+	if *priceFileFlag != "" {
+		c := provider.NewCached(pricer, *priceFileFlag, 0)
+		cachers = append(cachers, c)
+		pricer = c
 	}
 	pricer = awsprice.NewComposer(pricer)
 
@@ -76,8 +83,8 @@ func main() {
 		delta.WriteMarkdown(os.Stdout, *baselineFlag, rows, totals)
 	}
 
-	if cacher != nil {
-		if err := cacher.Save(); err != nil {
+	for _, c := range cachers {
+		if err := c.Save(); err != nil {
 			fmt.Fprintln(os.Stderr, "cache:", err)
 		}
 	}

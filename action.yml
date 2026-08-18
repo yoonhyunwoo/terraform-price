@@ -7,6 +7,9 @@ inputs:
   baseline-ref:
     description: Ref (branch or tag) to diff against; empty skips the delta report.
     default: ""
+  price-file:
+    description: Path to a committed prices.json (see README) enabling credentials-free runs; misses fall through to the network.
+    default: ""
   version:
     description: terraform-price release tag; "latest" resolves the newest release.
     default: "latest"
@@ -51,5 +54,8 @@ runs:
         args=()
         if [ -n "${{ inputs.baseline-ref }}" ]; then
           args+=(--baseline "$RUNNER_TEMP/terraform-price-baseline")
+        fi
+        if [ -n "${{ inputs.price-file }}" ]; then
+          args+=(--price-file "${{ inputs.price-file }}")
         fi
         terraform-price "${{ inputs.directory }}" "${args[@]}" | tee "$GITHUB_STEP_SUMMARY"

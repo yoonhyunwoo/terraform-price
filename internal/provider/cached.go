@@ -34,7 +34,8 @@ func NewCached(inner Pricer, path string, ttl time.Duration) *Cached {
 
 func (c *Cached) UnitPrice(ctx context.Context, q Query) (float64, string, error) {
 	key := cacheKey(q)
-	if e, ok := c.data[key]; ok && time.Since(time.Unix(e.CachedAt, 0)) <= c.ttl {
+	// ttl <= 0 means the entry never expires (seeded price file).
+	if e, ok := c.data[key]; ok && (c.ttl <= 0 || time.Since(time.Unix(e.CachedAt, 0)) <= c.ttl) {
 		return e.Price, e.Unit, nil
 	}
 	p, unit, err := c.inner.UnitPrice(ctx, q)

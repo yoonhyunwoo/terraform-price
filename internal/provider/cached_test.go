@@ -102,3 +102,20 @@ func TestCacheExpiredIgnored(t *testing.T) {
 		t.Fatalf("inner should be called for expired entry, got %d calls", stub.calls)
 	}
 }
+
+func TestPriceFileNeverExpires(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prices.json")
+	q := Query{Service: "AmazonEC2", Filters: []Filter{mkFilter("instanceType", "t3.micro")}}
+	c := NewCached(&stubPricer{}, path, 0)
+	if _, _, err := c.UnitPrice(context.Background(), q); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	c.data[cacheKey(q)] = cacheEntry{Price: 1.5, Unit: "Hrs", CachedAt: time.Now().Add(-365 * 24 * time.Hour).Unix()}
+	p, unit, err := c.UnitPrice(context.Background(), q)
+	if err != nil || p != 1.5 || unit != "Hrs" {
+		t.Fatalf("seeded price file entry must hit regardless of age, got (%v,%q,%v)", p, unit, err)
+	}
+}

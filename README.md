@@ -38,6 +38,7 @@ For CI, use the [GitHub Action](#github-action) instead.
 | Flag | Default | Description |
 |---|---|---|
 | `--no-cache` | `false` | Bypass the price cache for this run |
+| `--price-file` | — | JSON price file seeding lookups (never expires; misses fall through to the network and hits are written back) |
 | `--baseline` | — | Baseline directory to diff against (delta mode) |
 | `[dir]` | `.` | Target Terraform directory (positional) |
 
@@ -93,7 +94,31 @@ Inputs:
 |---|---|---|
 | `directory` | `.` | Terraform directory (PR head already checked out) |
 | `baseline-ref` | — | Ref to diff against; empty skips the delta section |
+| `price-file` | — | Committed `prices.json` for credentials-free runs |
 | `version` | `latest` | Release tag to install |
+
+### Credentials-free runs
+
+Without AWS credentials the report still runs; price rows degrade to unresolved. For real
+prices without giving CI any credentials, generate a price file once from a machine that
+has them, commit it, and point the action at it:
+
+```sh
+terraform-price terraform/ --price-file prices.json   # local, with credentials
+git add prices.json
+```
+
+```yaml
+      - uses: yoonhyunwoo/terraform-price@v0
+        with:
+          directory: terraform/
+          baseline-ref: ${{ github.base_ref }}
+          price-file: prices.json
+```
+
+The file uses the cache format, never expires, and grows: run the same command locally
+whenever a new resource type appears so its prices are added. Lookups missing from the
+file fall through to the network (and degrade to unresolved when CI has no credentials).
 
 The report (and the delta table, when `baseline-ref` is set) is written to the job step summary and the log. Any AWS credentials work — the Price List API returns public list prices. The bulk price files under `~/.cache/terraform-price` are cached between runs. Resources that cannot be analyzed (`git::` / private module sources, unresolved references, price lookups without credentials) surface as not estimated rather than as a number.
 
