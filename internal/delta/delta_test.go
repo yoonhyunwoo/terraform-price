@@ -190,3 +190,46 @@ func TestWriteCompact(t *testing.T) {
 		t.Errorf("compact output too long (%d bytes):\n%s", len(out), out)
 	}
 }
+
+func TestComputeMultiComponentAddress(t *testing.T) {
+	base := []output.CostItem{
+		fixed("aws_db_instance.main", "db.t3.medium", 45.63),
+		fixed("aws_db_instance.main", "gp3 storage 50GB", 5.75),
+		fixed("aws_instance.worker", "t3.small", 15.18),
+	}
+	proposed := []output.CostItem{
+		fixed("aws_db_instance.main", "db.m5.large", 124.83),
+		fixed("aws_db_instance.main", "gp3 storage 200GB", 23.00),
+		fixed("aws_instance.worker", "t3.small", 15.18),
+	}
+
+	rows, totals := Compute(base, proposed)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (one per changed db component): %+v", len(rows), rows)
+	}
+	if !approx(totals.Delta, 79.20+17.25) {
+		t.Fatalf("Delta = %.2f, want 96.45", totals.Delta)
+	}
+	if !approx(totals.Prior, 45.63+5.75+15.18) || !approx(totals.Proposed, 124.83+23.00+15.18) {
+		t.Fatalf("totals = %+v", totals)
+	}
+	for _, r := range rows {
+		if r.Addr != "aws_db_instance.main" {
+			t.Fatalf("unexpected row %+v", r)
+		}
+	}
+}
+
+func TestComputeMultiComponentUnchangedOnly(t *testing.T) {
+	items := []output.CostItem{
+		fixed("aws_db_instance.main", "db.t3.medium", 45.63),
+		fixed("aws_db_instance.main", "gp3 storage 50GB", 5.75),
+	}
+	rows, totals := Compute(items, items)
+	if len(rows) != 0 {
+		t.Fatalf("rows = %d, want 0: %+v", len(rows), rows)
+	}
+	if !approx(totals.Delta, 0) {
+		t.Fatalf("Delta = %.2f, want 0", totals.Delta)
+	}
+}

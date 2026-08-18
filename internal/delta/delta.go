@@ -71,13 +71,15 @@ func specChange(prior, proposed string) string {
 }
 
 func Compute(base, proposed []output.CostItem) ([]Row, Totals) {
-	baseBy := make(map[string]output.CostItem, len(base))
+	// One address can yield several cost rows (e.g. an RDS instance plus its
+	// storage); pair rows within an address, never collapse them.
+	baseBy := make(map[string][]output.CostItem, len(base))
 	for _, it := range base {
-		baseBy[it.Addr] = it
+		baseBy[it.Addr] = append(baseBy[it.Addr], it)
 	}
-	curBy := make(map[string]output.CostItem, len(proposed))
+	curBy := make(map[string][]output.CostItem, len(proposed))
 	for _, it := range proposed {
-		curBy[it.Addr] = it
+		curBy[it.Addr] = append(curBy[it.Addr], it)
 	}
 
 	var t Totals
@@ -105,49 +107,50 @@ func Compute(base, proposed []output.CostItem) ([]Row, Totals) {
 
 	var rows []Row
 	for _, addr := range addrs {
-		b, inBase := baseBy[addr]
-		c, inCur := curBy[addr]
-		switch {
-		case inBase && inCur:
-			if priced(b) && priced(c) {
-				if b.Spec == c.Spec && b.Monthly == c.Monthly {
+		bList, curList := baseBy[addr], curBy[addr]
+		// Identical specs pair first (unchanged components like storage when
+		// only the instance type changes); leftovers pair in order.
+		bUsed := make([]bool, len(bList))
+		cPair := make([]int, len(curList)) // cur index -> base index, -1 unpaired
+		for i := range cPair {
+			cPair[i] = -1
+		}
+		for ci, c := range curList {
+			for bi, b := range bList {
+				if !bUsed[bi] && b.Spec == c.Spec {
+					bUsed[bi] = true
+					cPair[ci] = bi
+					break
+				}
+			}
+		}
+		for ci := range curList {
+			if cPair[ci] >= 0 {
+				continue
+			}
+			for bi := range bList {
+				if !bUsed[bi] {
+					bUsed[bi] = true
+					cPair[ci] = bi
+					break
+				}
+			}
+		}
+		for ci, c := range curList {
+			if bi := cPair[ci]; bi >= 0 {
+				b := bList[bi]
+				if priced(b) && priced(c) && b.Spec == c.Spec && b.Monthly == c.Monthly {
 					continue
 				}
-				rows = append(rows, Row{
-					Kind: Update, Addr: addr, Change: specChange(b.Spec, c.Spec),
-					Prior: b.Monthly, Proposed: c.Monthly, Delta: c.Monthly - b.Monthly,
-				})
-				continue
+				rows = append(rows, rowFor(addr, b, c))
+			} else {
+				rows = append(rows, newRow(addr, c))
 			}
-			var parts []string
-			if !priced(b) {
-				parts = append(parts, "baseline "+reason(b))
+		}
+		for bi, b := range bList {
+			if !bUsed[bi] {
+				rows = append(rows, removedRow(addr, b))
 			}
-			if !priced(c) {
-				parts = append(parts, "proposed "+reason(c))
-			}
-			rows = append(rows, Row{
-				Kind: NotEstimated, Addr: addr, Change: specChange(b.Spec, c.Spec),
-				Note: strings.Join(parts, "; "),
-			})
-		case inCur:
-			if priced(c) {
-				rows = append(rows, Row{
-					Kind: Create, Addr: addr, Change: c.Spec,
-					Proposed: c.Monthly, Delta: c.Monthly,
-				})
-				continue
-			}
-			rows = append(rows, Row{Kind: NotEstimated, Addr: addr, Change: "new", Note: reason(c)})
-		default:
-			if priced(b) {
-				rows = append(rows, Row{
-					Kind: Delete, Addr: addr, Change: b.Spec,
-					Prior: b.Monthly, Delta: -b.Monthly,
-				})
-				continue
-			}
-			rows = append(rows, Row{Kind: NotEstimated, Addr: addr, Change: "removed", Note: reason(b)})
 		}
 	}
 
@@ -159,6 +162,40 @@ func Compute(base, proposed []output.CostItem) ([]Row, Totals) {
 		}
 	}
 	return rows, t
+}
+
+func rowFor(addr string, b, c output.CostItem) Row {
+	if priced(b) && priced(c) {
+		return Row{
+			Kind: Update, Addr: addr, Change: specChange(b.Spec, c.Spec),
+			Prior: b.Monthly, Proposed: c.Monthly, Delta: c.Monthly - b.Monthly,
+		}
+	}
+	var parts []string
+	if !priced(b) {
+		parts = append(parts, "baseline "+reason(b))
+	}
+	if !priced(c) {
+		parts = append(parts, "proposed "+reason(c))
+	}
+	return Row{
+		Kind: NotEstimated, Addr: addr, Change: specChange(b.Spec, c.Spec),
+		Note: strings.Join(parts, "; "),
+	}
+}
+
+func newRow(addr string, c output.CostItem) Row {
+	if priced(c) {
+		return Row{Kind: Create, Addr: addr, Change: c.Spec, Proposed: c.Monthly, Delta: c.Monthly}
+	}
+	return Row{Kind: NotEstimated, Addr: addr, Change: "new", Note: reason(c)}
+}
+
+func removedRow(addr string, b output.CostItem) Row {
+	if priced(b) {
+		return Row{Kind: Delete, Addr: addr, Change: b.Spec, Prior: b.Monthly, Delta: -b.Monthly}
+	}
+	return Row{Kind: NotEstimated, Addr: addr, Change: "removed", Note: reason(b)}
 }
 
 func WriteMarkdown(w io.Writer, label string, rows []Row, t Totals) {
