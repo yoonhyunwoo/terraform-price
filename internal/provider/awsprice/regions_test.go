@@ -100,6 +100,8 @@ func TestComposeUse1FamilyExceptions(t *testing.T) {
 		{"Aurora:StorageUsage", "Aurora:StorageUsage"},
 		{"Aurora:StorageIOUsage", "Aurora:StorageIOUsage"},
 		{"NatGateway-Hours", "NatGateway-Hours"},
+		{"RDS:GP3-Storage", "RDS:GP3-Storage"},
+		{"RDS:Multi-AZ-StorageUsage", "RDS:Multi-AZ-StorageUsage"},
 		{"AWSSecretsManager-Secrets", "USE1-AWSSecretsManager-Secrets"},
 		{"RDS:ProxyUsage", "USE1-RDS:ProxyUsage"},
 	}

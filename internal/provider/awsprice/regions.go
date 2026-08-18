@@ -105,6 +105,14 @@ var usEast1UnprefixedUsagetypes = map[string]bool{
 	"Aurora:StorageIOUsage":           true,
 	"Aurora:StorageUsage":             true,
 	"NatGateway-Hours":                true,
+	// RDS storage rows also ship unprefixed in us-east-1 (live survey 2026-08-18).
+	"RDS:GP2-Storage":           true,
+	"RDS:GP3-Storage":           true,
+	"RDS:StorageUsage":          true,
+	"RDS:Multi-AZ-GP2-Storage":  true,
+	"RDS:Multi-AZ-GP3-Storage":  true,
+	"RDS:Multi-AZ-StorageUsage": true,
+	"RDS:StorageIOUsage":        true,
 }
 
 // usEast1UnprefixedUsagePrefixes extends the exception to usagetype families:
