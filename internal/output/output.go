@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/yoonhyunwoo/terraform-price/internal/i18n"
 )
 
 type Kind int
@@ -85,7 +87,7 @@ func writeRow(w io.Writer, cells []string) {
 	fmt.Fprintln(w)
 }
 
-func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
+func WriteMarkdown(w io.Writer, l *i18n.L, service, region string, items []CostItem) {
 	var fixed, variable, unsupported, free []CostItem
 	for _, it := range items {
 		switch it.Kind {
@@ -101,14 +103,14 @@ func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
 	}
 	total := 0.0
 	fmt.Fprintf(w, "# Cost Estimate — %s (`%s`)\n\n", service, region)
-	fmt.Fprintf(w, "> OnDemand list prices only — RI / Savings Plan / EDP discounts not applied\n\n")
+	fmt.Fprintf(w, "%s\n\n", l.T(i18n.MsgCaveat))
 	if len(items) == 0 {
-		fmt.Fprintf(w, "> No resources found in this directory. If the Terraform lives in a\n> subdirectory (e.g. examples/xxx or modules/xxx), point the tool at that path.\n\n")
+		fmt.Fprintf(w, "%s\n\n", l.T(i18n.MsgNoResources))
 	}
 
-	fmt.Fprintln(w, "## Fixed")
+	fmt.Fprintln(w, l.T(i18n.MsgFixedSection))
 	fixedT := newMdTable(
-		[]string{"Resource", "Spec", "Unit price (USD)", "Unit", "Monthly (USD)"},
+		[]string{l.T(i18n.MsgColResource), l.T(i18n.MsgColSpec), l.T(i18n.MsgColUnitPrice), l.T(i18n.MsgColUnit), "Monthly (USD)"},
 		[]string{"---", "---", "---:", "---", "---:"},
 	)
 	for _, it := range fixed {
@@ -119,14 +121,14 @@ func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
 		total += it.Monthly
 		fixedT.row("`"+it.Addr+"`", it.Spec, fmt.Sprintf("%.4f", it.UnitPrice), it.Unit, fmt.Sprintf("%.2f", it.Monthly))
 	}
-	fixedT.row("**Fixed total / month**", "", "", "", "**"+fmt.Sprintf("%.2f", total)+"**")
+	fixedT.row(l.T(i18n.MsgFixedTotal), "", "", "", "**"+fmt.Sprintf("%.2f", total)+"**")
 	fixedT.render(w)
 	fmt.Fprintln(w)
 
 	if len(variable) > 0 {
-		fmt.Fprintln(w, "## Variable")
+		fmt.Fprintln(w, l.T(i18n.MsgVariableSection))
 		varT := newMdTable(
-			[]string{"Resource", "Type", "Unit price (USD)", "Notes"},
+			[]string{l.T(i18n.MsgColResource), l.T(i18n.MsgColType), l.T(i18n.MsgColUnitPrice), l.T(i18n.MsgColNotes)},
 			[]string{"---", "---", "---", "---"},
 		)
 		for _, it := range variable {
@@ -145,9 +147,9 @@ func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
 	}
 
 	if len(unsupported) > 0 {
-		fmt.Fprintf(w, "## Unsupported\n\n")
+		fmt.Fprintln(w, l.T(i18n.MsgUnsupportedSection)+"\n")
 		unsT := newMdTable(
-			[]string{"Resource", "Type", "Notes"},
+			[]string{l.T(i18n.MsgColResource), l.T(i18n.MsgColType), l.T(i18n.MsgColNotes)},
 			[]string{"---", "---", "---"},
 		)
 		for _, it := range unsupported {
@@ -158,9 +160,9 @@ func WriteMarkdown(w io.Writer, service, region string, items []CostItem) {
 	}
 
 	if len(free) > 0 {
-		fmt.Fprintf(w, "## Free\n\n")
+		fmt.Fprintln(w, l.T(i18n.MsgFreeSection)+"\n")
 		freeT := newMdTable(
-			[]string{"Resource", "Type"},
+			[]string{l.T(i18n.MsgColResource), l.T(i18n.MsgColType)},
 			[]string{"---", "---"},
 		)
 		for _, it := range free {

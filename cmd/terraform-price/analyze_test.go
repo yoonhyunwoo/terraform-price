@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/yoonhyunwoo/terraform-price/internal/i18n"
+
 	"github.com/yoonhyunwoo/terraform-price/internal/delta"
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
 	"github.com/yoonhyunwoo/terraform-price/internal/provider"
@@ -104,7 +106,7 @@ resource "aws_ebs_volume" "data" {
 		t.Fatalf("proposed analyze: %v", err)
 	}
 
-	rows, totals := delta.Compute(baseItems, curItems)
+	rows, totals := delta.Compute(i18n.New(), baseItems, curItems)
 	if len(rows) != 3 {
 		t.Fatalf("rows = %d, want 3: %+v", len(rows), rows)
 	}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yoonhyunwoo/terraform-price/internal/i18n"
+
 	"github.com/yoonhyunwoo/terraform-price/internal/output"
 )
 
@@ -32,7 +34,7 @@ func TestComputeUpdateCreateDeleteSkip(t *testing.T) {
 		fixed("aws_ebs_volume.data", "gp3 100GB", 8.00),
 	}
 
-	rows, totals := Compute(base, proposed)
+	rows, totals := Compute(i18n.New(), base, proposed)
 	if len(rows) != 3 {
 		t.Fatalf("rows = %d, want 3 (skip must drop unchanged): %+v", len(rows), rows)
 	}
@@ -77,7 +79,7 @@ func TestComputeNotEstimatedExcludedFromDelta(t *testing.T) {
 		fixed("aws_instance.web", "t3.micro", 9.05),
 	}
 
-	rows, totals := Compute(base, proposed)
+	rows, totals := Compute(i18n.New(), base, proposed)
 	if len(rows) != 1 || rows[0].Kind != NotEstimated {
 		t.Fatalf("rows = %+v, want single NotEstimated", rows)
 	}
@@ -105,7 +107,7 @@ func TestComputeFreeTransitions(t *testing.T) {
 		fixed("aws_instance.web", "t3.medium", 36.21),
 	}
 
-	rows, totals := Compute(base, proposed)
+	rows, totals := Compute(i18n.New(), base, proposed)
 	if len(rows) != 1 || rows[0].Addr != "aws_instance.web" {
 		t.Fatalf("rows = %+v, want only the instance update (free→free skipped)", rows)
 	}
@@ -122,7 +124,7 @@ func TestComputeUnresolvedReasons(t *testing.T) {
 		{Kind: output.Unsupported, Addr: "aws_db_instance.db"},
 	}
 
-	rows, _ := Compute(base, proposed)
+	rows, _ := Compute(i18n.New(), base, proposed)
 	if len(rows) != 1 || rows[0].Kind != NotEstimated {
 		t.Fatalf("rows = %+v", rows)
 	}
@@ -131,7 +133,7 @@ func TestComputeUnresolvedReasons(t *testing.T) {
 		t.Errorf("note = %q, want %q", rows[0].Note, want)
 	}
 
-	onlyBase, _ := Compute(base, nil)
+	onlyBase, _ := Compute(i18n.New(), base, nil)
 	if len(onlyBase) != 1 || onlyBase[0].Kind != NotEstimated || onlyBase[0].Change != "removed" {
 		t.Errorf("removed-unresolved row = %+v", onlyBase[0])
 	}
@@ -143,7 +145,7 @@ func TestWriteMarkdown(t *testing.T) {
 		{Kind: NotEstimated, Addr: "aws_s3_bucket.logs", Change: "new", Note: "usage-based"},
 	}
 	var buf bytes.Buffer
-	WriteMarkdown(&buf, "base", rows, Totals{Prior: 41.90, Proposed: 63.37, Delta: 21.61, NotEstimated: 1})
+	WriteMarkdown(&buf, i18n.New(), "base", rows, Totals{Prior: 41.90, Proposed: 63.37, Delta: 21.61, NotEstimated: 1})
 	out := buf.String()
 	for _, want := range []string{
 		"## Monthly cost change vs `base`",
@@ -157,7 +159,7 @@ func TestWriteMarkdown(t *testing.T) {
 	}
 
 	buf.Reset()
-	WriteMarkdown(&buf, "base", nil, Totals{})
+	WriteMarkdown(&buf, i18n.New(), "base", nil, Totals{})
 	if !strings.Contains(buf.String(), "No priced changes.") {
 		t.Errorf("empty rows output = %q", buf.String())
 	}
@@ -170,7 +172,7 @@ func TestWriteCompact(t *testing.T) {
 		{Kind: NotEstimated, Addr: "aws_s3_bucket.logs", Change: "new", Note: "unresolved (price lookup failed: operation error Pricing: GetProducts, get identity: " + strings.Repeat("x", 300) + ")"},
 	}
 	var buf bytes.Buffer
-	WriteCompact(&buf, rows, Totals{Prior: 41.90, Proposed: 63.37, Delta: 21.61, NotEstimated: 1})
+	WriteCompact(&buf, i18n.New(), rows, Totals{Prior: 41.90, Proposed: 63.37, Delta: 21.61, NotEstimated: 1})
 	out := buf.String()
 	for _, want := range []string{
 		"**Monthly cost increased by $21.61/mo** ($41.90/mo → $63.37/mo) ↑",
@@ -203,7 +205,7 @@ func TestComputeMultiComponentAddress(t *testing.T) {
 		fixed("aws_instance.worker", "t3.small", 15.18),
 	}
 
-	rows, totals := Compute(base, proposed)
+	rows, totals := Compute(i18n.New(), base, proposed)
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2 (one per changed db component): %+v", len(rows), rows)
 	}
@@ -225,7 +227,7 @@ func TestComputeMultiComponentUnchangedOnly(t *testing.T) {
 		fixed("aws_db_instance.main", "db.t3.medium", 45.63),
 		fixed("aws_db_instance.main", "gp3 storage 50GB", 5.75),
 	}
-	rows, totals := Compute(items, items)
+	rows, totals := Compute(i18n.New(), items, items)
 	if len(rows) != 0 {
 		t.Fatalf("rows = %d, want 0: %+v", len(rows), rows)
 	}

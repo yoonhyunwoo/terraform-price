@@ -41,9 +41,29 @@ For CI, use the [GitHub Action](#github-action) instead.
 | `--price-file` | — | JSON price file seeding lookups (never expires; misses fall through to the network and hits are written back) |
 | `--format` | `full` | `full` (all tables) or `compact` (CI summary) |
 | `--baseline` | — | Baseline directory to diff against (delta mode) |
+| `--lang` | `en` | Report language: `en`, `ko` (also `TFPRICE_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG`) |
 | `[dir]` | `.` | Target Terraform directory (positional) |
 
-Region comes from tfvars `aws_region` (default `ap-northeast-2`). All 39 regions the AWS Price List API covers are supported. The report title comes from tfvars `origin_service_name` (default: directory name).
+Region comes from tfvars `aws_region` (default `us-east-1`, the Price List API home region). All 39 regions the AWS Price List API covers are supported. The report title comes from tfvars `origin_service_name` (default: directory name).
+
+## Languages
+
+Reports are available in English (source) and Korean. Language resolution:
+`--lang` flag, then `TFPRICE_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG`; an
+unsupported value falls back to English.
+
+### Adding a translation
+
+1. Copy `internal/i18n/active.en.json` to `internal/i18n/active.<code>.json`
+   and translate the values. Keep the keys, the `{{.Placeholder}}` names, and
+   resource specs (`t3.medium`, `gp3 500GB`) unchanged.
+2. Add the code to `Languages` in `internal/i18n/i18n.go`.
+3. Run `go test ./internal/i18n/` — `TestLocalesComplete` fails on missing
+   keys, unknown keys, or placeholders dropped in translation (the same check
+   CI runs on your PR).
+
+English is the source of truth: rewording an English message is a deliberate
+change that every locale file must follow (the test enforces the sync).
 
 ## Report
 
@@ -99,6 +119,7 @@ Inputs:
 | `price-file` | — | Committed `prices.json` for credentials-free runs |
 | `version` | `latest` | Release tag to install |
 | `format` | `compact` | `compact` (delta-first CI summary) or `full` (all tables) |
+| `language` | — | Report language, e.g. `ko`; empty follows the runner's `LANG` |
 
 ### Credentials-free runs
 

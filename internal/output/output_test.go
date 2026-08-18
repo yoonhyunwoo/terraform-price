@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/yoonhyunwoo/terraform-price/internal/i18n"
 )
 
 func TestWriteMarkdownFourWayPartition(t *testing.T) {
@@ -15,7 +17,7 @@ func TestWriteMarkdownFourWayPartition(t *testing.T) {
 		{Kind: Unsupported, Addr: "aws_widget.w", Type: "aws_widget", Note: "unsupported"},
 	}
 	var buf bytes.Buffer
-	WriteMarkdown(&buf, "svc", "ap-northeast-2", items)
+	WriteMarkdown(&buf, i18n.New(), "svc", "ap-northeast-2", items)
 	out := buf.String()
 
 	if !strings.Contains(out, "7.30") {
@@ -49,7 +51,7 @@ func TestWriteMarkdownFourWayPartition(t *testing.T) {
 
 func TestWriteMarkdownNoUnsupportedOmitsGapSection(t *testing.T) {
 	var buf bytes.Buffer
-	WriteMarkdown(&buf, "svc", "ap-northeast-2", []CostItem{
+	WriteMarkdown(&buf, i18n.New(), "svc", "ap-northeast-2", []CostItem{
 		{Kind: Fixed, Addr: "aws_instance.a", Spec: "t3.micro", UnitPrice: 0.01, Unit: "Hrs", Monthly: 7.3},
 	})
 	out := buf.String()
@@ -69,7 +71,7 @@ func TestMarkdownTableIntegrity(t *testing.T) {
 		{Kind: Variable, Addr: "aws_s3_bucket.x", Type: "aws_s3_bucket", Note: "a|b"},
 	}
 	var buf bytes.Buffer
-	WriteMarkdown(&buf, "svc", "r", items)
+	WriteMarkdown(&buf, i18n.New(), "svc", "r", items)
 	lines := strings.Split(buf.String(), "\n")
 	pipeCount := 6 // fixed table: 5 columns + 2 outer pipes... computed below
 	_ = pipeCount
@@ -103,5 +105,27 @@ func TestMdTableClampsArity(t *testing.T) {
 	}
 	if got := strings.Count(out, "\n"); got != 3 { // header + align + 1 row
 		t.Errorf("render produced %d lines, want 3:\n%s", got, out)
+	}
+}
+
+func TestWriteCompactKorean(t *testing.T) {
+	items := []CostItem{
+		{Kind: Fixed, Addr: "aws_instance.web", Spec: "t3.medium", UnitPrice: 0.0416, Unit: "Hrs", Monthly: 30.37},
+		{Kind: Variable, Addr: "aws_s3_bucket.artifacts", Type: "aws_s3_bucket", Note: "S3 storage, requests, and data transfer (usage-based)"},
+		{Kind: Free, Addr: "aws_vpc.main"},
+	}
+	var buf bytes.Buffer
+	WriteCompact(&buf, i18n.New("ko"), "web", "ap-northeast-2", items)
+	got := buf.String()
+	for _, want := range []string{
+		"## terraform-price — web (`ap-northeast-2`)",
+		"**$30.37/mo** — 1건 산정",
+		"| 리소스 | 사양 | $/mo |",
+		"총액 미포함 2건",
+		"사용량 기반",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ko output missing %q:\n%s", want, got)
+		}
 	}
 }

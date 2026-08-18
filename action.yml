@@ -16,6 +16,9 @@ inputs:
   format:
     description: Report format — compact (CI summary, default) or full (all tables).
     default: "compact"
+  language:
+    description: Report language (en, ko); empty falls back to the runner's LANG.
+    default: ""
 runs:
   using: composite
   steps:
@@ -62,6 +65,9 @@ runs:
           args+=(--price-file "${{ inputs.price-file }}")
         fi
         args+=(--format "${{ inputs.format }}")
+        if [ -n "${{ inputs.language }}" ]; then
+          args+=(--lang "${{ inputs.language }}")
+        fi
         { echo "## terraform-price report"; echo "<!-- terraform-price-report -->"; terraform-price "${args[@]}" "${{ inputs.directory }}"; } | tee "$GITHUB_STEP_SUMMARY" > "$RUNNER_TEMP/terraform-price-report.md"
     - name: Comment on the pull request
       if: ${{ github.event_name == 'pull_request' }}
