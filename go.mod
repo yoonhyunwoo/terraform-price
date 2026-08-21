@@ -9,7 +9,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/nicksnyder/go-i18n/v2 v2.6.0
 	github.com/zclconf/go-cty v1.16.3
-	golang.org/x/text v0.32.0
+	golang.org/x/text v0.41.0
 )
 
 require (
@@ -28,7 +28,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.4 // indirect
 	github.com/aws/smithy-go v1.27.1 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
-	golang.org/x/mod v0.30.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/tools v0.39.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/tools v0.48.0 // indirect
 )
