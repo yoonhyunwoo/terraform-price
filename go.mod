@@ -8,13 +8,14 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/pricing v1.42.8
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/nicksnyder/go-i18n/v2 v2.6.0
-	github.com/zclconf/go-cty v1.16.3
+	github.com/zclconf/go-cty v1.19.0
 	golang.org/x/text v0.32.0
 )
 
 require (
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
+	github.com/apparentlymart/go-textseg/v17 v17.0.1 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.25 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.29 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.29 // indirect
