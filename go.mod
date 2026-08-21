@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.26
 	github.com/aws/aws-sdk-go-v2/service/pricing v1.42.8
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/nicksnyder/go-i18n/v2 v2.6.0
+	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/zclconf/go-cty v1.16.3
 	golang.org/x/text v0.32.0
 )
